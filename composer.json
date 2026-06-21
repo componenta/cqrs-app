@@ -10,6 +10,10 @@
         "componenta/class-finder": "^1.0",
         "componenta/config": "^1.0",
         "componenta/cqrs": "^1.0",
+        "componenta/cqrs-lock": "^1.0",
+        "componenta/cqrs-policy": "^1.0",
+        "componenta/cqrs-retry": "^1.0",
+        "componenta/cqrs-transport": "^1.0",
         "componenta/tokenizer": "^1.0",
         "psr/container": "^2.0"
     },
