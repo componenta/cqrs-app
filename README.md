@@ -15,27 +15,24 @@ composer require componenta/cqrs-app
 | Dependency | Purpose |
 |---|---|
 | PHP `^8.4` | Modern language features and strict types. |
-| `componenta/app` | Compile cache contributor integration. |
-| `componenta/arrayable` | Shared array conversion contract. |
 | `componenta/class-finder` | Class discovery and listener compiler integration. |
 | `componenta/config` | Config provider integration. |
 | `componenta/cqrs` | Core CQRS runtime contracts and config keys. |
-| `componenta/tokenizer` | Source inspection for handler map compilation. |
+| `componenta/tokenizer` | Supplies `ClassInfo` and its existing reflector to discovery. |
 | `psr/container` | Service lookup. |
 
 ## What It Registers
 
 | Config section | Entries |
 |---|---|
-| `factories` | Attribute and compiled-map locators for command handlers, command listeners, and query handlers. |
-| `invokables` | Command/query handler map compilers, command listener map compiler, and command attribute map compiler/contributor. |
-| `ClassFinderConfigKey::LISTENERS` | Attribute locators used during discovery. |
-| `CompileConfigKey::LISTENER_COMPILERS` | Map compilers used during build. |
-| `AppConfigKey::COMPILE_CACHE_CONTRIBUTORS` | Command attribute map contributor. |
+| `factories` | One `CqrsDiscoveryIndex`, one application map provider, and application-aware factories for the three locator interfaces. |
+| `invokables` | One `CqrsMapCompiler`. |
+| `ClassFinderConfigKey::LISTENERS` | The single `CqrsDiscoveryIndex` listener. |
+| `CompileConfigKey::LISTENER_COMPILERS` | The single compiler that emits `ConfigKey::CQRS_MAP`. |
 
 ## Usage
 
-Register the provider together with `componenta/cqrs`:
+Register the core provider first and the application provider second:
 
 ```php
 return [
@@ -43,6 +40,8 @@ return [
     new Componenta\CQRS\App\ConfigProvider(),
 ];
 ```
+
+Both packages bind the locator interfaces directly through factories. Provider order is therefore the explicit implementation-selection mechanism: `cqrs-app` replaces the three core locator factories with application-aware ones. It does not call core factories manually. A later application provider may deliberately select another implementation, and delegators registered for the same requested id still wrap that result.
 
 Use discovery attributes in application code:
 
@@ -59,7 +58,25 @@ final readonly class PublishPostHandler
 }
 ```
 
-In production, build-time maps should be generated and restored from cache. The app provider switches to plain runtime locators when the environment is production and compiled maps are available.
+## Discovery And Metadata
+
+`CqrsDiscoveryIndex` reads `ClassInfo::$reflector` once per class and collects command handlers, query handlers, listeners, known command names, and configured command metadata attributes. It validates public non-static handler methods, rejects conflicting handlers, deduplicates identical listeners, and performs sorting once in `finalize()`.
+
+Optional packages add metadata without changing the compiler by appending an attribute class to `ConfigKey::COMMAND_METADATA_ATTRIBUTES`. The factory validates that every entry exists and is declared with `#[Attribute]`.
+
+`ConfigKey::DISCOVERY_ENABLED` may explicitly enable or disable the live overlay. When omitted, discovery is enabled in every environment except exact `APP_ENV=production`; `test` and `staging` therefore remain non-production.
+
+## Production Build
+
+With `componenta/app-console`, build the artifact before starting production:
+
+```bash
+APP_ENV=development php bin/console.php app:build
+```
+
+The compiler writes one deterministic CQRS map v2 into the application config cache. Production locators read that map without scanning application classes. Metadata for a known compiled command never falls back to reflection; an unknown command may still use the reflection provider.
+
+An old CQRS key, unsupported map version, or missing production map fails with an instruction to clear caches and rebuild. After upgrading from v1, remove the config, discovery, old CQRS, generated resolver, and release-fingerprint caches before running `app:build`.
 
 ## Optional Runtime Packages
 

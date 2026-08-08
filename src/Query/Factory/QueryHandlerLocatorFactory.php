@@ -4,39 +4,45 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Query\Factory;
 
-use Componenta\Config\Config;
-use Componenta\CQRS\App\Query\Locator\AttributeQueryHandlerLocator;
-use Componenta\CQRS\ConfigKey;
-use Componenta\CQRS\Query\Factory\QueryHandlerLocatorFactory as PlainQueryHandlerLocatorFactory;
-use Componenta\CQRS\Query\Locator\LocatorCollector;
+use Componenta\CQRS\App\Map\ApplicationCqrsMapProvider;
+use Componenta\CQRS\Query\Locator\QueryHandlerLocator;
 use Componenta\CQRS\Query\Locator\QueryHandlerLocatorInterface;
+use Componenta\CQRS\Query\Resolver\QueryNameResolverInterface;
+use InvalidArgumentException;
 use Psr\Container\ContainerInterface;
 
 final class QueryHandlerLocatorFactory
 {
     public function __invoke(ContainerInterface $container): QueryHandlerLocatorInterface
     {
-        $plain = (new PlainQueryHandlerLocatorFactory())($container);
+        $mapProvider = $container->get(ApplicationCqrsMapProvider::class);
 
-        if (!$this->isDevelopment($container)) {
-            return $plain;
+        if (!$mapProvider instanceof ApplicationCqrsMapProvider) {
+            throw new InvalidArgumentException(sprintf(
+                'Container entry "%s" must be a %s instance.',
+                ApplicationCqrsMapProvider::class,
+                ApplicationCqrsMapProvider::class,
+            ));
         }
 
-        /** @var AttributeQueryHandlerLocator $attributeLocator */
-        $attributeLocator = $container->get(AttributeQueryHandlerLocator::class);
+        $resolver = null;
 
-        return new LocatorCollector(
-            $plain,
-            $attributeLocator,
+        if ($container->has(QueryNameResolverInterface::class)) {
+            $resolver = $container->get(QueryNameResolverInterface::class);
+
+            if (!$resolver instanceof QueryNameResolverInterface) {
+                throw new InvalidArgumentException(sprintf(
+                    'Container entry "%s" must implement %s.',
+                    QueryNameResolverInterface::class,
+                    QueryNameResolverInterface::class,
+                ));
+            }
+        }
+
+        return new QueryHandlerLocator(
+            $mapProvider,
+            $container,
+            $resolver,
         );
-    }
-
-    private function isDevelopment(ContainerInterface $container): bool
-    {
-        /** @var Config $config */
-        $config = $container->get(ConfigKey::CONFIG);
-
-        return $config->environment === null
-            || $config->environment->match('APP_ENV', 'development', false);
     }
 }

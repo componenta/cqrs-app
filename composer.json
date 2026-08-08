@@ -5,17 +5,20 @@
     "license": "MIT",
     "require": {
         "php": "^8.4",
-        "componenta/app": "^1.0.2",
-        "componenta/arrayable": "^1.0",
         "componenta/class-finder": "^1.0",
-        "componenta/config": "^1.0",
-        "componenta/cqrs": "^1.0",
-        "componenta/cqrs-lock": "^1.0",
-        "componenta/cqrs-policy": "^1.0",
-        "componenta/cqrs-retry": "^1.0",
-        "componenta/cqrs-transport": "^1.0",
+        "componenta/config": "^2.0",
+        "componenta/cqrs": "^2.0",
         "componenta/tokenizer": "^1.0",
         "psr/container": "^2.0"
+    },
+    "require-dev": {
+        "pestphp/pest": "^4.0"
+    },
+    "suggest": {
+        "componenta/cqrs-lock": "Adds lock metadata and command locking.",
+        "componenta/cqrs-policy": "Adds command policy integration.",
+        "componenta/cqrs-retry": "Adds retry metadata and middleware.",
+        "componenta/cqrs-transport": "Adds async transport metadata and dispatch."
     },
     "autoload": {
         "psr-4": {
@@ -26,9 +29,6 @@
         "psr-4": {
             "Componenta\\CQRS\\App\\Tests\\": "tests/"
         }
-    },
-    "require-dev": {
-        "pestphp/pest": "^4.0"
     },
     "minimum-stability": "stable",
     "extra": {

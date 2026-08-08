@@ -4,39 +4,45 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Command\Factory;
 
-use Componenta\Config\Config;
-use Componenta\CQRS\App\Command\Locator\AttributeCommandHandlerLocator;
-use Componenta\CQRS\Command\Factory\CommandHandlerLocatorFactory as PlainCommandHandlerLocatorFactory;
+use Componenta\CQRS\App\Map\ApplicationCqrsMapProvider;
+use Componenta\CQRS\Command\Locator\CommandHandlerLocator;
 use Componenta\CQRS\Command\Locator\CommandHandlerLocatorInterface;
-use Componenta\CQRS\Command\Locator\LocatorCollector;
-use Componenta\CQRS\ConfigKey;
+use Componenta\CQRS\Command\Resolver\CommandNameResolverInterface;
+use InvalidArgumentException;
 use Psr\Container\ContainerInterface;
 
 final class CommandHandlerLocatorFactory
 {
     public function __invoke(ContainerInterface $container): CommandHandlerLocatorInterface
     {
-        $plain = (new PlainCommandHandlerLocatorFactory())($container);
+        $mapProvider = $container->get(ApplicationCqrsMapProvider::class);
 
-        if (!$this->isDevelopment($container)) {
-            return $plain;
+        if (!$mapProvider instanceof ApplicationCqrsMapProvider) {
+            throw new InvalidArgumentException(sprintf(
+                'Container entry "%s" must be a %s instance.',
+                ApplicationCqrsMapProvider::class,
+                ApplicationCqrsMapProvider::class,
+            ));
         }
 
-        /** @var AttributeCommandHandlerLocator $attributeLocator */
-        $attributeLocator = $container->get(AttributeCommandHandlerLocator::class);
+        $resolver = null;
 
-        return new LocatorCollector(
-            $plain,
-            $attributeLocator,
+        if ($container->has(CommandNameResolverInterface::class)) {
+            $resolver = $container->get(CommandNameResolverInterface::class);
+
+            if (!$resolver instanceof CommandNameResolverInterface) {
+                throw new InvalidArgumentException(sprintf(
+                    'Container entry "%s" must implement %s.',
+                    CommandNameResolverInterface::class,
+                    CommandNameResolverInterface::class,
+                ));
+            }
+        }
+
+        return new CommandHandlerLocator(
+            $mapProvider,
+            $container,
+            $resolver,
         );
-    }
-
-    private function isDevelopment(ContainerInterface $container): bool
-    {
-        /** @var Config $config */
-        $config = $container->get(ConfigKey::CONFIG);
-
-        return $config->environment === null
-            || $config->environment->match('APP_ENV', 'development', false);
     }
 }

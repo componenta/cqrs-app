@@ -4,39 +4,45 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Command\Factory;
 
-use Componenta\Config\Config;
-use Componenta\CQRS\App\Command\Locator\AttributeCommandListenersLocator;
-use Componenta\CQRS\App\Command\Locator\CommandListenersLocatorCollector;
-use Componenta\CQRS\ConfigKey;
-use Componenta\CQRS\Command\Factory\CommandListenerLocatorFactory as PlainCommandListenersLocatorFactory;
+use Componenta\CQRS\App\Map\ApplicationCqrsMapProvider;
+use Componenta\CQRS\Command\Locator\CommandListenersLocator;
 use Componenta\CQRS\Command\Locator\CommandListenersLocatorInterface;
+use Componenta\CQRS\Command\Resolver\CommandNameResolverInterface;
+use InvalidArgumentException;
 use Psr\Container\ContainerInterface;
 
 final class CommandListenersLocatorFactory
 {
     public function __invoke(ContainerInterface $container): CommandListenersLocatorInterface
     {
-        $plain = (new PlainCommandListenersLocatorFactory())($container);
+        $mapProvider = $container->get(ApplicationCqrsMapProvider::class);
 
-        if (!$this->isDevelopment($container)) {
-            return $plain;
+        if (!$mapProvider instanceof ApplicationCqrsMapProvider) {
+            throw new InvalidArgumentException(sprintf(
+                'Container entry "%s" must be a %s instance.',
+                ApplicationCqrsMapProvider::class,
+                ApplicationCqrsMapProvider::class,
+            ));
         }
 
-        /** @var AttributeCommandListenersLocator $attributeLocator */
-        $attributeLocator = $container->get(AttributeCommandListenersLocator::class);
+        $resolver = null;
 
-        return new CommandListenersLocatorCollector(
-            $plain,
-            $attributeLocator,
+        if ($container->has(CommandNameResolverInterface::class)) {
+            $resolver = $container->get(CommandNameResolverInterface::class);
+
+            if (!$resolver instanceof CommandNameResolverInterface) {
+                throw new InvalidArgumentException(sprintf(
+                    'Container entry "%s" must implement %s.',
+                    CommandNameResolverInterface::class,
+                    CommandNameResolverInterface::class,
+                ));
+            }
+        }
+
+        return new CommandListenersLocator(
+            $mapProvider,
+            $container,
+            $resolver,
         );
-    }
-
-    private function isDevelopment(ContainerInterface $container): bool
-    {
-        /** @var Config $config */
-        $config = $container->get(ConfigKey::CONFIG);
-
-        return $config->environment === null
-            || $config->environment->match('APP_ENV', 'development', false);
     }
 }
