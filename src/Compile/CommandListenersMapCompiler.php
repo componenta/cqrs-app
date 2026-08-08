@@ -23,6 +23,8 @@ final class CommandListenersMapCompiler implements ListenerCompilerInterface
     public function compile(object $listener, string $cacheDir): CompileResult
     {
         /** @var AttributeCommandListenersLocator $listener */
-        return CompileResult::config(ConfigKey::COMMAND_LISTENER_MAP, $listener->toArray());
+        $map = $listener->toArray();
+
+        return $map === [] ? CompileResult::empty() : CompileResult::config(ConfigKey::COMMAND_LISTENER_MAP, $map);
     }
 }

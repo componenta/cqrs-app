@@ -19,4 +19,8 @@ describe('CommandAttributeMapContributor', function () {
             ->and($delta[ConfigKey::COMMAND_ATTRIBUTE_MAP]['attributes'])
             ->toHaveKey(CqrsAppContributorAnnotatedCommand::class);
     });
+
+    it('omits the command attribute section when no metadata is discovered', function () {
+        expect((new CommandAttributeMapContributor())->compile([]))->toBe([]);
+    });
 });

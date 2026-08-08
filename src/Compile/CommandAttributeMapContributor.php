@@ -16,8 +16,10 @@ final readonly class CommandAttributeMapContributor implements CompileCacheContr
      */
     public function compile(array $classes): array
     {
-        return [
-            ConfigKey::COMMAND_ATTRIBUTE_MAP => (new CommandAttributeMapCompiler())->compile($classes),
-        ];
+        $map = (new CommandAttributeMapCompiler())->compile($classes);
+
+        return $map['known'] === [] && $map['attributes'] === []
+            ? []
+            : [ConfigKey::COMMAND_ATTRIBUTE_MAP => $map];
     }
 }

@@ -24,6 +24,8 @@ final class QueryHandlerMapCompiler implements ListenerCompilerInterface
     public function compile(object $listener, string $cacheDir): CompileResult
     {
         /** @var AttributeQueryHandlerLocator $listener */
-        return CompileResult::config(ConfigKey::QUERY_HANDLER_MAP, $listener->toArray());
+        $map = $listener->toArray();
+
+        return $map === [] ? CompileResult::empty() : CompileResult::config(ConfigKey::QUERY_HANDLER_MAP, $map);
     }
 }
