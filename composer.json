@@ -5,15 +5,15 @@
     "license": "MIT",
     "require": {
         "php": "^8.4",
-        "componenta/app": "^2.0@dev",
+        "componenta/app": "^2.0",
         "componenta/arrayable": "^1.0",
         "componenta/class-finder": "^1.0",
         "componenta/config": "^1.0",
-        "componenta/cqrs": "^2.0@dev",
-        "componenta/cqrs-lock": "^2.0@dev",
-        "componenta/cqrs-policy": "^2.0@dev",
-        "componenta/cqrs-retry": "^2.0@dev",
-        "componenta/cqrs-transport": "^2.0@dev",
+        "componenta/cqrs": "^2.0",
+        "componenta/cqrs-lock": "^2.0",
+        "componenta/cqrs-policy": "^2.0",
+        "componenta/cqrs-retry": "^2.0",
+        "componenta/cqrs-transport": "^2.0",
         "componenta/tokenizer": "^1.0",
         "psr/container": "^2.0"
     },
@@ -30,7 +30,7 @@
     "require-dev": {
         "pestphp/pest": "^4.0"
     },
-    "minimum-stability": "dev",
+    "minimum-stability": "stable",
     "extra": {
         "componenta": {
             "config-providers": [
