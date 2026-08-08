@@ -37,5 +37,14 @@
                 "Componenta\\CQRS\\App\\ConfigProvider"
             ]
         }
-    }
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "scripts": {
+        "test": "@php vendor/bin/pest"
+    },
+    "prefer-stable": true
 }
