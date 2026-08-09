@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App;
 
+use Componenta\App\ConfigKey as AppConfigKey;
 use Componenta\ClassFinder\Compile\ConfigKey as CompileConfigKey;
 use Componenta\ClassFinder\ConfigKey as ClassFinderConfigKey;
 use Componenta\Config\ConfigProvider as BaseConfigProvider;
@@ -45,6 +46,7 @@ final class ConfigProvider extends BaseConfigProvider
         return [
             CompileConfigKey::LISTENER_COMPILERS => [CqrsMapCompiler::class],
             ClassFinderConfigKey::LISTENERS => [CqrsDiscoveryIndex::class],
+            AppConfigKey::AUTOWIRE_ENTRY_CONTRIBUTORS => [CqrsDiscoveryIndex::class],
         ];
     }
 }

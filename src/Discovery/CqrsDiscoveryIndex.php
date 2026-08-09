@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Discovery;
 
+use Componenta\ClassFinder\Attribute\DevOnly;
 use Componenta\ClassFinder\Exception\ListenerAlreadyFinalizedException;
 use Componenta\ClassFinder\FinalizableListenerInterface;
 use Componenta\ClassFinder\FinalizationStateInterface;
@@ -16,13 +17,16 @@ use Componenta\CQRS\Map\CommandMetadataDescriptor;
 use Componenta\CQRS\Map\CqrsMap;
 use Componenta\CQRS\Map\HandlerDescriptor;
 use Componenta\CQRS\Query\Attribute\AsQueryHandler;
+use Componenta\DI\Compile\Autowire\AutowireEntry;
+use Componenta\DI\Compile\Autowire\AutowireEntryContributorInterface;
 use Componenta\Tokenizer\ClassInfo;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
 use ReflectionNamedType;
 
-final class CqrsDiscoveryIndex implements FinalizableListenerInterface, FinalizationStateInterface
+#[DevOnly]
+final class CqrsDiscoveryIndex implements FinalizableListenerInterface, FinalizationStateInterface, AutowireEntryContributorInterface
 {
     /** @var array<string, HandlerDescriptor> */
     private array $commandHandlers = [];
@@ -89,6 +93,28 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         );
 
         $this->map = $map;
+    }
+
+    public function entries(): iterable
+    {
+        $services = [];
+
+        foreach ([...array_values($this->commandHandlers), ...array_values($this->queryHandlers)] as $handler) {
+            $services[$handler->service] = true;
+        }
+
+        foreach ($this->commandListeners as $listeners) {
+            foreach ($listeners as $listener) {
+                $services[$listener->service] = true;
+            }
+        }
+
+        ksort($services);
+        foreach (array_keys($services) as $service) {
+            if (class_exists($service)) {
+                yield new AutowireEntry($service, 'CQRS discovery');
+            }
+        }
     }
 
     public function map(): CqrsMap

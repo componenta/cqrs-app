@@ -76,7 +76,7 @@ APP_ENV=development php bin/console.php app:build
 
 Compiler записывает одну детерминированную CQRS map v2 в config cache приложения. Production-локаторы читают её без сканирования классов. Метаданные известной скомпилированной команды не используют reflection fallback; для неизвестной команды fallback допустим.
 
-Старый CQRS key, неподдерживаемая версия карты или отсутствующая production map приводят к ошибке с указанием очистить cache и повторить build. При переходе с v1 удалите кеши конфигурации, discovery, старых CQRS maps, generated resolver и release fingerprint перед запуском `app:build`.
+Старый CQRS key, неподдерживаемая версия карты или отсутствующая production map приводят к ошибке с указанием очистить cache и повторить build. При переходе с v1 удалите кеши конфигурации, discovery, старых CQRS maps и старые кеши контейнера перед запуском `app:build`.
 
 ## Optional Runtime Packages
 

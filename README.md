@@ -76,7 +76,7 @@ APP_ENV=development php bin/console.php app:build
 
 The compiler writes one deterministic CQRS map v2 into the application config cache. Production locators read that map without scanning application classes. Metadata for a known compiled command never falls back to reflection; an unknown command may still use the reflection provider.
 
-An old CQRS key, unsupported map version, or missing production map fails with an instruction to clear caches and rebuild. After upgrading from v1, remove the config, discovery, old CQRS, generated resolver, and release-fingerprint caches before running `app:build`.
+An old CQRS key, unsupported map version, or missing production map fails with an instruction to clear caches and rebuild. After upgrading from v1, remove the config, discovery, old CQRS, and legacy container caches before running `app:build`.
 
 ## Optional Runtime Packages
 

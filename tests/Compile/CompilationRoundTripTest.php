@@ -103,8 +103,7 @@ it('round-trips discovery through one compiled cache artifact into production di
         throw new RuntimeException('Unable to create CQRS config cache test file.');
     }
 
-    $resolverFile = $cacheFile . '.resolver.php';
-    $releaseFingerprint = 'cqrs-round-trip-v2';
+    $factoryDirectory = $cacheFile . '.factories';
     $environment = new Environment(['APP_ENV' => 'production']);
 
     try {
@@ -114,35 +113,40 @@ it('round-trips discovery through one compiled cache artifact into production di
             new CqrsAppConfigProvider(),
             $compiledProvider,
         );
-        ContainerBuilder::configure($sourceProductionConfig)
-            ->compileGeneratedEntryResolver(
-                [
-                    RoundTripCommandHandler::class,
-                    RoundTripQueryHandler::class,
-                    RoundTripListener::class,
-                ],
-                $resolverFile,
-                releaseFingerprint: $releaseFingerprint,
-            );
-        $resolverProvider = static fn(): array => [
-            DiConfigKey::DEPENDENCIES => [
-                DiConfigKey::GENERATED_ENTRY_RESOLVER_FILE => $resolverFile,
-                DiConfigKey::GENERATED_ENTRY_RESOLVER_RELEASE_FINGERPRINT
-                    => $releaseFingerprint,
-            ],
-        ];
+        $factoryBuilder = ContainerBuilder::configure($sourceProductionConfig);
+        $factories = $factoryBuilder
+            ->compileFactories($index->entries(), $factoryDirectory);
         $cacheConfig = ConfigLoader::load(
             $environment,
             new CqrsConfigProvider(),
             new CqrsAppConfigProvider(),
             $compiledProvider,
-            $resolverProvider,
         );
         ConfigLoader::export($cacheConfig, $cacheFile);
 
         $rawCache = require $cacheFile;
         $productionConfig = ConfigLoader::loadFromFile($cacheFile);
-        $production = ContainerBuilder::configure($productionConfig)->build();
+        $productionDependencies = $sourceProductionConfig->get(DiConfigKey::DEPENDENCIES);
+        $productionDependencies[DiConfigKey::FACTORIES] = array_replace(
+            $factories,
+            $productionDependencies[DiConfigKey::FACTORIES] ?? [],
+        );
+        $productionInvokables = $productionDependencies[DiConfigKey::INVOKABLES] ?? [];
+        foreach ($factoryBuilder->invokables as $class) {
+            if (!in_array($class, $productionInvokables, true)) {
+                $productionInvokables[] = $class;
+            }
+        }
+        $productionDependencies[DiConfigKey::INVOKABLES] = $productionInvokables;
+
+        $production = ContainerBuilder::configureFromCache(
+            $productionConfig,
+            [
+                'version' => ContainerBuilder::CACHE_VERSION,
+                DiConfigKey::DEPENDENCIES => $productionDependencies,
+            ],
+            $factoryDirectory,
+        )->build();
         $command = new RoundTripCommand('compiled');
         $query = new RoundTripQuery('compiled');
         $commandHandler = $production
@@ -165,15 +169,22 @@ it('round-trips discovery through one compiled cache artifact into production di
 
         expect($result->configKey)->toBe(ConfigKey::CQRS_MAP)
             ->and($rawCache['config'][ConfigKey::CQRS_MAP])->toBe($compiledMap)
-            ->and(file_get_contents($resolverFile))
-                ->toContain(RoundTripCommandHandler::class)
-                ->toContain(RoundTripQueryHandler::class)
-                ->toContain(RoundTripListener::class)
+            ->and($factories)->toBeEmpty()
+            ->and($productionInvokables)->toContain(
+                RoundTripCommandHandler::class,
+                RoundTripQueryHandler::class,
+                RoundTripListener::class,
+            )
             ->and($commandHandler($command))->toBe('command:compiled')
             ->and($queryHandler($query))->toBe('query:compiled')
             ->and(RoundTripListener::$events)->toBe([CommandProcessedEvent::class]);
     } finally {
-        @unlink($resolverFile);
+        foreach (glob($factoryDirectory . '/container.factories.*.php') ?: [] as $factoryFile) {
+            @unlink($factoryFile);
+        }
+        if (is_dir($factoryDirectory)) {
+            @rmdir($factoryDirectory);
+        }
         @unlink($cacheFile);
     }
 });

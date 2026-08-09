@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Componenta\App\ConfigKey as AppConfigKey;
 use Componenta\ClassFinder\Compile\ConfigKey as CompileConfigKey;
 use Componenta\ClassFinder\ConfigKey as ClassFinderConfigKey;
 use Componenta\Config\ConfigKey as DependencyConfigKey;
@@ -25,6 +26,8 @@ it('registers one discovery listener and one compiler with application locator f
     expect($config[CompileConfigKey::LISTENER_COMPILERS])
         ->toBe([CqrsMapCompiler::class])
         ->and($config[ClassFinderConfigKey::LISTENERS])
+        ->toBe([CqrsDiscoveryIndex::class])
+        ->and($config[AppConfigKey::AUTOWIRE_ENTRY_CONTRIBUTORS])
         ->toBe([CqrsDiscoveryIndex::class])
         ->and($dependencies[DependencyConfigKey::INVOKABLES])
         ->toBe([CqrsMapCompiler::class])
