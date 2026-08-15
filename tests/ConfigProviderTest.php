@@ -9,6 +9,7 @@ use Componenta\Config\ConfigKey as DependencyConfigKey;
 use Componenta\CQRS\App\Command\Factory\CommandHandlerLocatorFactory;
 use Componenta\CQRS\App\Command\Factory\CommandListenersLocatorFactory;
 use Componenta\CQRS\App\Compile\CqrsMapCompiler;
+use Componenta\CQRS\App\Compile\Factory\CqrsMapCompilerFactory;
 use Componenta\CQRS\App\ConfigProvider;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
 use Componenta\CQRS\App\Discovery\Factory\CqrsDiscoveryIndexFactory;
@@ -29,10 +30,11 @@ it('registers one discovery listener and one compiler with application locator f
         ->toBe([CqrsDiscoveryIndex::class])
         ->and($config[AppConfigKey::AUTOWIRE_ENTRY_CONTRIBUTORS])
         ->toBe([CqrsDiscoveryIndex::class])
-        ->and($dependencies[DependencyConfigKey::INVOKABLES])
-        ->toBe([CqrsMapCompiler::class])
+        ->and($dependencies[DependencyConfigKey::INVOKABLES] ?? [])
+        ->toBe([])
         ->and($dependencies[DependencyConfigKey::FACTORIES])
         ->toBe([
+            CqrsMapCompiler::class => CqrsMapCompilerFactory::class,
             CqrsDiscoveryIndex::class => CqrsDiscoveryIndexFactory::class,
             ApplicationCqrsMapProvider::class => ApplicationCqrsMapProviderFactory::class,
             QueryHandlerLocatorInterface::class => QueryHandlerLocatorFactory::class,

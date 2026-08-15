@@ -7,6 +7,8 @@ use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
 use Componenta\CQRS\Command\Attribute\AsCommandHandler;
 use Componenta\CQRS\ConfigKey;
 use Componenta\CQRS\Map\CqrsMap;
+use Componenta\CQRS\Map\CqrsMapProviderInterface;
+use Componenta\CQRS\Map\HandlerDescriptor;
 use Componenta\Tokenizer\ClassInfo;
 
 final readonly class CompilerTestCommand
@@ -68,4 +70,25 @@ it('does not finalize discovery implicitly and rejects unsupported listeners', f
         ->and($index->finalized)->toBeFalse()
         ->and(fn() => $compiler->compile(new stdClass(), ''))
         ->toThrow(InvalidArgumentException::class, 'supports only');
+});
+
+it('merges the configured base map before emitting the compiled discovery map', function (): void {
+    $base = new class implements CqrsMapProviderInterface {
+        public function map(): CqrsMap
+        {
+            return new CqrsMap(commandHandlers: [
+                'manual.command' => new HandlerDescriptor('manual.handler', 'handle'),
+            ]);
+        }
+    };
+    $index = new CqrsDiscoveryIndex();
+    $index->handle(new ClassInfo(CompilerTestHandler::class));
+    $index->finalize();
+
+    $result = (new CqrsMapCompiler($base))->compile($index, '');
+    $map = CqrsMap::fromArray($result->configValue);
+
+    expect($map->commandHandler('manual.command')?->service)->toBe('manual.handler')
+        ->and($map->commandHandler(CompilerTestCommand::class)?->service)
+        ->toBe(CompilerTestHandler::class);
 });

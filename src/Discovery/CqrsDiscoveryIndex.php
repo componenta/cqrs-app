@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Discovery;
 
+use Attribute;
 use Componenta\ClassFinder\Attribute\DevOnly;
 use Componenta\ClassFinder\Exception\ListenerAlreadyFinalizedException;
 use Componenta\ClassFinder\FinalizableListenerInterface;
@@ -22,8 +23,12 @@ use Componenta\DI\Compile\Autowire\AutowireEntryContributorInterface;
 use Componenta\Tokenizer\ClassInfo;
 use ReflectionAttribute;
 use ReflectionClass;
+use ReflectionIntersectionType;
 use ReflectionMethod;
 use ReflectionNamedType;
+use ReflectionParameter;
+use ReflectionType;
+use ReflectionUnionType;
 
 #[DevOnly]
 final class CqrsDiscoveryIndex implements FinalizableListenerInterface, FinalizationStateInterface, AutowireEntryContributorInterface
@@ -138,7 +143,8 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         $methods = [];
 
         foreach ($reflector->getMethods() as $method) {
-            if ($method->getAttributes($attribute) !== []) {
+            if ($method->getDeclaringClass()->getName() === $reflector->getName()
+                && $method->getAttributes($attribute) !== []) {
                 $methods[] = $method;
             }
         }
@@ -153,6 +159,10 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         }
 
         if ($classAttributes === [] && $methods === []) {
+            return;
+        }
+
+        if ($classAttributes === [] && !$reflector->isInstantiable()) {
             return;
         }
 
@@ -224,9 +234,31 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         string $kind,
     ): string {
         $this->assertHandlerMethod($method, $kind);
+        $messageParameter = $this->messageParameter($method, $kind);
 
         $arguments = $attribute->getArguments();
         $namedKey = $kind === 'command' ? 'command' : 'query';
+        foreach (array_keys($arguments) as $argument) {
+            if ($argument !== 0 && $argument !== $namedKey) {
+                throw new InvalidDiscoveryDeclarationException(sprintf(
+                    'CQRS %s handler attribute on "%s::%s" has unsupported argument "%s".',
+                    $kind,
+                    $method->getDeclaringClass()->getName(),
+                    $method->getName(),
+                    (string) $argument,
+                ));
+            }
+        }
+
+        if (count($arguments) > 1) {
+            throw new InvalidDiscoveryDeclarationException(sprintf(
+                'CQRS %s handler attribute on "%s::%s" must declare at most one message name.',
+                $kind,
+                $method->getDeclaringClass()->getName(),
+                $method->getName(),
+            ));
+        }
+
         $explicit = $arguments[$namedKey] ?? $arguments[0] ?? null;
 
         if ($explicit !== null) {
@@ -239,22 +271,22 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
                 ));
             }
 
+            if ((class_exists($explicit) || interface_exists($explicit))
+                && !$this->parameterAccepts($messageParameter, $explicit)
+            ) {
+                throw new InvalidDiscoveryDeclarationException(sprintf(
+                    'Explicit CQRS %s "%s" is incompatible with the first parameter of "%s::%s".',
+                    $kind,
+                    $explicit,
+                    $method->getDeclaringClass()->getName(),
+                    $method->getName(),
+                ));
+            }
+
             return $explicit;
         }
 
-        $parameters = $method->getParameters();
-
-        if ($parameters === []) {
-            throw new InvalidDiscoveryDeclarationException(sprintf(
-                'Cannot infer CQRS %s name from "%s::%s": the method has no parameters.',
-                $kind,
-                $method->getDeclaringClass()->getName(),
-                $method->getName(),
-            ));
-
-        }
-
-        $type = $parameters[0]->getType();
+        $type = $messageParameter->getType();
         if (!$type instanceof ReflectionNamedType || $type->isBuiltin()) {
             throw new InvalidDiscoveryDeclarationException(sprintf(
                 'Cannot infer CQRS %s name from "%s::%s": the first parameter must be a class type; use an explicit message name for union or intersection types.',
@@ -264,7 +296,14 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
             ));
         }
 
-        return $type->getName();
+        $declaringClass = $method->getDeclaringClass();
+
+        return match ($type->getName()) {
+            'self' => $declaringClass->getName(),
+            'parent' => $this->parentClassName($declaringClass)
+                ?? throw new InvalidDiscoveryDeclarationException('Cannot infer a parent CQRS message type without a parent class.'),
+            default => $type->getName(),
+        };
     }
 
     /**
@@ -272,14 +311,146 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
      */
     private function assertHandlerMethod(ReflectionMethod $method, string $kind): void
     {
-        if (!$method->isPublic() || $method->isStatic()) {
+        $name = $method->getName();
+
+        if (!$method->isPublic()
+            || $method->isStatic()
+            || ($name !== '__invoke' && str_starts_with($name, '__'))
+        ) {
             throw new InvalidDiscoveryDeclarationException(sprintf(
-                'CQRS %s handler method "%s::%s" must be public and non-static.',
+                'CQRS %s handler method "%s::%s" must be a public non-static operation method.',
                 $kind,
                 $method->getDeclaringClass()->getName(),
                 $method->getName(),
             ));
         }
+    }
+
+    /**
+     * @param 'command'|'query' $kind
+     */
+    private function messageParameter(ReflectionMethod $method, string $kind): ReflectionParameter
+    {
+        $parameter = $method->getParameters()[0] ?? null;
+
+        if ($parameter === null) {
+            throw new InvalidDiscoveryDeclarationException(sprintf(
+                'CQRS %s handler "%s::%s" must accept the message in its first parameter slot.',
+                $kind,
+                $method->getDeclaringClass()->getName(),
+                $method->getName(),
+            ));
+        }
+
+        if ($parameter->isPassedByReference() || $parameter->isVariadic()) {
+            throw new InvalidDiscoveryDeclarationException(sprintf(
+                'The first parameter of CQRS %s handler "%s::%s" must be a normal by-value parameter.',
+                $kind,
+                $method->getDeclaringClass()->getName(),
+                $method->getName(),
+            ));
+        }
+
+        foreach (array_slice($method->getParameters(), 1) as $additional) {
+            if (!$additional->isOptional() && !$additional->isVariadic()) {
+                throw new InvalidDiscoveryDeclarationException(sprintf(
+                    'CQRS %s handler "%s::%s" cannot require additional parameter "$%s"; the runtime supplies only the message.',
+                    $kind,
+                    $method->getDeclaringClass()->getName(),
+                    $method->getName(),
+                    $additional->getName(),
+                ));
+            }
+        }
+
+        if (!$this->typeCanAcceptObject($parameter->getType())) {
+            throw new InvalidDiscoveryDeclarationException(sprintf(
+                'The first parameter of CQRS %s handler "%s::%s" must accept an object message.',
+                $kind,
+                $method->getDeclaringClass()->getName(),
+                $method->getName(),
+            ));
+        }
+
+        return $parameter;
+    }
+
+    private function typeCanAcceptObject(?ReflectionType $type): bool
+    {
+        if ($type === null) {
+            return true;
+        }
+
+        if ($type instanceof ReflectionUnionType) {
+            return array_any(
+                $type->getTypes(),
+                fn(ReflectionType $member): bool => $this->typeCanAcceptObject($member),
+            );
+        }
+
+        if ($type instanceof ReflectionIntersectionType) {
+            return array_all(
+                $type->getTypes(),
+                fn(ReflectionType $member): bool => $this->typeCanAcceptObject($member),
+            );
+        }
+
+        return $type instanceof ReflectionNamedType
+            && (!$type->isBuiltin()
+                || in_array($type->getName(), ['mixed', 'object'], true));
+    }
+
+    /** @param class-string $message */
+    private function parameterAccepts(ReflectionParameter $parameter, string $message): bool
+    {
+        $type = $parameter->getType();
+
+        return $type === null || $this->typeAccepts($type, $message, $parameter->getDeclaringClass());
+    }
+
+    /**
+     * @param class-string $message
+     * @param ReflectionClass<object>|null $scope
+     */
+    private function typeAccepts(ReflectionType $type, string $message, ?ReflectionClass $scope): bool
+    {
+        if ($type instanceof ReflectionUnionType) {
+            return array_any(
+                $type->getTypes(),
+                fn(ReflectionType $member): bool => $this->typeAccepts($member, $message, $scope),
+            );
+        }
+
+        if ($type instanceof ReflectionIntersectionType) {
+            return array_all(
+                $type->getTypes(),
+                fn(ReflectionType $member): bool => $this->typeAccepts($member, $message, $scope),
+            );
+        }
+
+        if (!$type instanceof ReflectionNamedType) {
+            return false;
+        }
+
+        if ($type->isBuiltin()) {
+            return in_array($type->getName(), ['mixed', 'object'], true);
+        }
+
+        $accepted = match ($type->getName()) {
+            'self' => $scope?->getName(),
+            'parent' => $scope === null ? null : $this->parentClassName($scope),
+            default => $type->getName(),
+        };
+
+        return $accepted !== null && is_a($message, $accepted, true);
+    }
+
+    /** @param ReflectionClass<object> $class */
+    private function parentClassName(ReflectionClass $class): ?string
+    {
+        $parent = $class->getParentClass();
+
+        return $parent === false ? null : $parent->getName();
     }
 
     /**
@@ -370,6 +541,31 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
     private function discoverMetadata(ReflectionClass $reflector): void
     {
         foreach ($this->metadataAttributes as $attributeClass) {
+            if (!class_exists($attributeClass)) {
+                throw new InvalidDiscoveryDeclarationException(sprintf(
+                    'Command metadata attribute class "%s" does not exist.',
+                    $attributeClass,
+                ));
+            }
+
+            $attributeDeclaration = new ReflectionClass($attributeClass);
+            $attributeMetadata = $attributeDeclaration->getAttributes(Attribute::class);
+
+            if ($attributeMetadata === []) {
+                throw new InvalidDiscoveryDeclarationException(sprintf(
+                    'Command metadata class "%s" is not declared with #[Attribute].',
+                    $attributeClass,
+                ));
+            }
+
+            $flags = $attributeMetadata[0]->newInstance()->flags;
+            if (($flags & Attribute::TARGET_CLASS) === 0) {
+                throw new InvalidDiscoveryDeclarationException(sprintf(
+                    'Command metadata attribute "%s" must allow class targets.',
+                    $attributeClass,
+                ));
+            }
+
             $attributes = $reflector->getAttributes($attributeClass);
 
             if ($attributes === []) {

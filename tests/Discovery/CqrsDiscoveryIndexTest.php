@@ -144,7 +144,7 @@ final readonly class DiscoveryMixedHandler
 final readonly class DiscoveryDuplicateHandlerA
 {
     #[AsCommandHandler(command: DiscoveryCommandA::class)]
-    public function handle(): void
+    public function handle(DiscoveryCommandA $command): void
     {
     }
 }
@@ -152,9 +152,83 @@ final readonly class DiscoveryDuplicateHandlerA
 final readonly class DiscoveryDuplicateHandlerB
 {
     #[AsCommandHandler(command: DiscoveryCommandA::class)]
+    public function handle(DiscoveryCommandA $command): void
+    {
+    }
+}
+
+final readonly class DiscoveryZeroParameterHandler
+{
+    #[AsCommandHandler(command: DiscoveryCommandA::class)]
     public function handle(): void
     {
     }
+}
+
+final readonly class DiscoveryRequiredSecondParameterHandler
+{
+    #[AsCommandHandler(command: DiscoveryCommandA::class)]
+    public function handle(DiscoveryCommandA $command, string $required): void
+    {
+    }
+}
+
+final readonly class DiscoveryScalarMessageHandler
+{
+    #[AsCommandHandler(command: 'logical.command')]
+    public function handle(string $command): void
+    {
+    }
+}
+
+final class DiscoveryMagicMethodHandler
+{
+    #[AsCommandHandler(command: 'logical.command')]
+    public function __get(string $name): mixed
+    {
+        return null;
+    }
+}
+
+final readonly class DiscoveryByReferenceHandler
+{
+    #[AsCommandHandler(command: DiscoveryCommandA::class)]
+    public function handle(DiscoveryCommandA &$command): void
+    {
+    }
+}
+
+final readonly class DiscoveryMismatchedMessageHandler
+{
+    #[AsCommandHandler(command: DiscoveryCommandA::class)]
+    public function handle(DiscoveryCommandB $command): void
+    {
+    }
+}
+
+final readonly class DiscoveryUnknownAttributeArgumentHandler
+{
+    #[AsCommandHandler(unsupported: DiscoveryCommandA::class)]
+    public function handle(DiscoveryCommandA $command): void
+    {
+    }
+}
+
+abstract class DiscoveryInheritedHandlerBase
+{
+    #[AsCommandHandler(command: DiscoveryCommandA::class)]
+    public function handle(DiscoveryCommandA $command): void
+    {
+    }
+}
+
+final class DiscoveryInheritedHandlerChild extends DiscoveryInheritedHandlerBase
+{
+}
+
+#[Attribute(Attribute::TARGET_METHOD)]
+final class DiscoveryMethodOnlyMetadata
+{
 }
 
 /**
@@ -256,11 +330,11 @@ it('rejects invalid handler method declarations and ambiguous inference', functi
 })->with([
     'private command method' => [
         DiscoveryPrivateHandler::class,
-        'public and non-static',
+        'public non-static operation',
     ],
     'static query method' => [
         DiscoveryStaticHandler::class,
-        'public and non-static',
+        'public non-static operation',
     ],
     'union without explicit message' => [
         DiscoveryUnionWithoutExplicitHandler::class,
@@ -270,7 +344,51 @@ it('rejects invalid handler method declarations and ambiguous inference', functi
         DiscoveryMixedHandler::class,
         'both the class and method',
     ],
+    'explicit handler without message slot' => [
+        DiscoveryZeroParameterHandler::class,
+        'first parameter slot',
+    ],
+    'required second parameter' => [
+        DiscoveryRequiredSecondParameterHandler::class,
+        'cannot require additional parameter',
+    ],
+    'scalar message parameter with explicit alias' => [
+        DiscoveryScalarMessageHandler::class,
+        'must accept an object message',
+    ],
+    'unsupported magic handler method' => [
+        DiscoveryMagicMethodHandler::class,
+        'public non-static operation',
+    ],
+    'message passed by reference' => [
+        DiscoveryByReferenceHandler::class,
+        'normal by-value parameter',
+    ],
+    'explicit message incompatible with parameter' => [
+        DiscoveryMismatchedMessageHandler::class,
+        'is incompatible with the first parameter',
+    ],
+    'unsupported handler attribute argument' => [
+        DiscoveryUnknownAttributeArgumentHandler::class,
+        'unsupported argument',
+    ],
 ]);
+
+it('does not rediscover inherited method attributes on child services', function (): void {
+    $index = finalizedDiscoveryIndex([
+        DiscoveryInheritedHandlerBase::class,
+        DiscoveryInheritedHandlerChild::class,
+    ]);
+
+    expect($index->map()->commandHandler(DiscoveryCommandA::class))->toBeNull();
+});
+
+it('rejects metadata attributes that cannot target command classes', function (): void {
+    $index = new CqrsDiscoveryIndex([DiscoveryMethodOnlyMetadata::class]);
+
+    expect(fn() => $index->handle(new ClassInfo(DiscoveryCommandA::class)))
+        ->toThrow(InvalidDiscoveryDeclarationException::class, 'must allow class targets');
+});
 
 it('rejects different handlers for the same message', function (): void {
     $index = new CqrsDiscoveryIndex();

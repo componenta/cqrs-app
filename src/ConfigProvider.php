@@ -11,6 +11,7 @@ use Componenta\Config\ConfigProvider as BaseConfigProvider;
 use Componenta\CQRS\App\Command\Factory\CommandHandlerLocatorFactory;
 use Componenta\CQRS\App\Command\Factory\CommandListenersLocatorFactory;
 use Componenta\CQRS\App\Compile\CqrsMapCompiler;
+use Componenta\CQRS\App\Compile\Factory\CqrsMapCompilerFactory;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
 use Componenta\CQRS\App\Discovery\Factory\CqrsDiscoveryIndexFactory;
 use Componenta\CQRS\App\Map\ApplicationCqrsMapProvider;
@@ -25,17 +26,13 @@ final class ConfigProvider extends BaseConfigProvider
     protected function getFactories(): array
     {
         return [
+            CqrsMapCompiler::class => CqrsMapCompilerFactory::class,
             CqrsDiscoveryIndex::class => CqrsDiscoveryIndexFactory::class,
             ApplicationCqrsMapProvider::class => ApplicationCqrsMapProviderFactory::class,
             QueryHandlerLocatorInterface::class => QueryHandlerLocatorFactory::class,
             CommandHandlerLocatorInterface::class => CommandHandlerLocatorFactory::class,
             CommandListenersLocatorInterface::class => CommandListenersLocatorFactory::class,
         ];
-    }
-
-    protected function getInvokables(): array
-    {
-        return [CqrsMapCompiler::class];
     }
 
     /**

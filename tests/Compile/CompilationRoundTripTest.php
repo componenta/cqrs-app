@@ -169,12 +169,6 @@ it('round-trips discovery through one compiled cache artifact into production di
 
         expect($result->configKey)->toBe(ConfigKey::CQRS_MAP)
             ->and($rawCache['config'][ConfigKey::CQRS_MAP])->toBe($compiledMap)
-            ->and($factories)->toBeEmpty()
-            ->and($productionInvokables)->toContain(
-                RoundTripCommandHandler::class,
-                RoundTripQueryHandler::class,
-                RoundTripListener::class,
-            )
             ->and($commandHandler($command))->toBe('command:compiled')
             ->and($queryHandler($query))->toBe('query:compiled')
             ->and(RoundTripListener::$events)->toBe([CommandProcessedEvent::class]);
