@@ -27,13 +27,23 @@ final class ApplicationCqrsMapProviderFactory
             );
         }
 
+        $environment = $config->environment?->string('APP_ENV', 'development')
+            ?? 'development';
+        $isDevelopment = $environment === 'development';
         $enabled = $config->get(
             AppConfigKey::DISCOVERY_ENABLED,
-            $config->environment?->string('APP_ENV', 'development') !== 'production',
+            $isDevelopment,
         );
 
         if (!is_bool($enabled)) {
             throw new InvalidArgumentException('CQRS discovery flag must be bool.');
+        }
+
+        if ($enabled && !$isDevelopment) {
+            throw new InvalidArgumentException(sprintf(
+                'Runtime CQRS discovery may be enabled only in development; "%s" environment requires a compiled CQRS map.',
+                $environment,
+            ));
         }
 
         if (!$enabled) {
