@@ -4,25 +4,21 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Compile\Factory;
 
+use Componenta\Config\ContainerValue;
 use Componenta\CQRS\App\Compile\CqrsMapCompiler;
+use Componenta\CQRS\ConfigKey;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
-use InvalidArgumentException;
-use Psr\Container\ContainerInterface;
 
 final readonly class CqrsMapCompilerFactory
 {
-    public function __invoke(ContainerInterface $container): CqrsMapCompiler
+    public function __invoke(ContainerValue $container): CqrsMapCompiler
     {
-        $base = $container->get(CqrsMapProviderInterface::class);
-
-        if (!$base instanceof CqrsMapProviderInterface) {
-            throw new InvalidArgumentException(sprintf(
-                'Container entry "%s" must implement %s.',
+        return new CqrsMapCompiler(
+            mapProvider: $container->get(
                 CqrsMapProviderInterface::class,
                 CqrsMapProviderInterface::class,
-            ));
-        }
-
-        return new CqrsMapCompiler($base);
+            ),
+            configuredMapPresent: $container->config->has(ConfigKey::CQRS_MAP),
+        );
     }
 }
