@@ -145,14 +145,20 @@ it('marks a full effective map so generic build merging replaces numeric indexes
 
     expect($result->configValue[ConfigMergeKey::OVERRIDE_INDEXES])->toBeTrue();
 
-    $compiled = config_merge(
+    $compiledArtifact = config_merge(
         $configured->toArray(),
         $result->configValue,
     );
+    $compiledMap = CqrsMap::fromArray($compiledArtifact);
 
-    expect($compiled)->toBe($provider->map()->toArray())
-        ->and(CqrsMap::fromArray($compiled)->commandHandler('manual.command')?->service)
+    expect($compiledMap->toArray())->toBe($provider->map()->toArray())
+        ->and($compiledMap->commandHandler('manual.command')?->service)
         ->toBe('manual.handler')
-        ->and(CqrsMap::fromArray($compiled)->commandHandler(CompilerTestCommand::class)?->service)
-        ->toBe(CompilerTestHandler::class);
+        ->and($compiledMap->commandHandler(CompilerTestCommand::class)?->service)
+        ->toBe(CompilerTestHandler::class)
+        ->and($compiledMap->commandListeners('manual.command'))->toHaveCount(1)
+        ->and($compiledMap->commandMetadata(
+            'manual.command',
+            CompilerTestMetadata::class,
+        )?->arguments)->toBe([3, 100]);
 });
