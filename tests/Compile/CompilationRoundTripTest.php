@@ -18,6 +18,7 @@ use Componenta\CQRS\Command\Locator\CommandListenersLocatorInterface;
 use Componenta\CQRS\Command\Operation;
 use Componenta\CQRS\ConfigKey;
 use Componenta\CQRS\ConfigProvider as CqrsConfigProvider;
+use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use Componenta\CQRS\Query\Attribute\AsQueryHandler;
 use Componenta\CQRS\Query\Locator\QueryHandlerLocatorInterface;
 use Componenta\DI\ConfigKey as DiConfigKey;
@@ -73,7 +74,7 @@ final class RoundTripListener implements CommandListenerInterface
     }
 }
 
-it('round-trips discovery through one compiled cache artifact into production dispatch', function (): void {
+it('round-trips the effective development map into production dispatch', function (): void {
     $developmentConfig = ConfigLoader::load(
         new Environment(['APP_ENV' => 'development']),
         new CqrsConfigProvider(),
@@ -91,7 +92,9 @@ it('round-trips discovery through one compiled cache artifact into production di
     }
 
     $index->finalize();
-    $result = (new CqrsMapCompiler())->compile($index, '');
+    $developmentMapProvider = $development->get(CqrsMapProviderInterface::class);
+    $developmentMap = $developmentMapProvider->map()->toArray();
+    $result = (new CqrsMapCompiler($developmentMapProvider))->compile($index, '');
 
     $compiledMap = $result->configValue;
     $compiledProvider = static fn(): array => [
@@ -168,7 +171,10 @@ it('round-trips discovery through one compiled cache artifact into production di
         }
 
         expect($result->configKey)->toBe(ConfigKey::CQRS_MAP)
+            ->and($compiledMap)->toBe($developmentMap)
             ->and($rawCache['config'][ConfigKey::CQRS_MAP])->toBe($compiledMap)
+            ->and($production->get(CqrsMapProviderInterface::class)->map()->toArray())
+            ->toBe($developmentMap)
             ->and($commandHandler($command))->toBe('command:compiled')
             ->and($queryHandler($query))->toBe('query:compiled')
             ->and(RoundTripListener::$events)->toBe([CommandProcessedEvent::class]);
