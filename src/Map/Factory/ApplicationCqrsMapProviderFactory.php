@@ -4,29 +4,20 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Map\Factory;
 
-use Componenta\Config\Config;
+use Componenta\Config\ContainerValue;
 use Componenta\CQRS\App\ConfigKey as AppConfigKey;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
-use Componenta\CQRS\App\Map\ApplicationCqrsMapProvider;
 use Componenta\CQRS\App\Map\DiscoveryCqrsMapProvider;
-use Componenta\CQRS\ConfigKey;
+use Componenta\CQRS\Map\CompositeCqrsMapProvider;
+use Componenta\CQRS\Map\ConfigCqrsMapProvider;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use InvalidArgumentException;
-use Psr\Container\ContainerInterface;
 
 final class ApplicationCqrsMapProviderFactory
 {
-    public function __invoke(ContainerInterface $container): ApplicationCqrsMapProvider
+    public function __invoke(ContainerValue $container): CqrsMapProviderInterface
     {
-        $config = $container->get(ConfigKey::CONFIG);
-        $base = $container->get(CqrsMapProviderInterface::class);
-
-        if (!$config instanceof Config || !$base instanceof CqrsMapProviderInterface) {
-            throw new InvalidArgumentException(
-                'CQRS application map provider requires Config and CqrsMapProviderInterface services.',
-            );
-        }
-
+        $config = $container->config;
         $environment = $config->environment?->string('APP_ENV', 'development')
             ?? 'development';
         $isDevelopment = $environment === 'development';
@@ -46,22 +37,19 @@ final class ApplicationCqrsMapProviderFactory
             ));
         }
 
+        $configured = new ConfigCqrsMapProvider($config);
+
         if (!$enabled) {
-            return new ApplicationCqrsMapProvider($base);
+            return $configured;
         }
 
-        $index = $container->get(CqrsDiscoveryIndex::class);
+        $index = $container->get(
+            CqrsDiscoveryIndex::class,
+            CqrsDiscoveryIndex::class,
+        );
 
-        if (!$index instanceof CqrsDiscoveryIndex) {
-            throw new InvalidArgumentException(sprintf(
-                'Container entry "%s" must be a %s instance.',
-                CqrsDiscoveryIndex::class,
-                CqrsDiscoveryIndex::class,
-            ));
-        }
-
-        return new ApplicationCqrsMapProvider(
-            $base,
+        return new CompositeCqrsMapProvider(
+            $configured,
             new DiscoveryCqrsMapProvider($index),
         );
     }
