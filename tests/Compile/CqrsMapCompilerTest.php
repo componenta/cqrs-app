@@ -2,32 +2,60 @@
 
 declare(strict_types=1);
 
+use Componenta\Config\ConfigKey as ConfigMergeKey;
 use Componenta\CQRS\App\Compile\CqrsMapCompiler;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
+use Componenta\CQRS\App\Map\DiscoveryCqrsMapProvider;
 use Componenta\CQRS\Command\Attribute\AsCommandHandler;
 use Componenta\CQRS\ConfigKey;
+use Componenta\CQRS\Map\CompositeCqrsMapProvider;
 use Componenta\CQRS\Map\CqrsMap;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
 use Componenta\CQRS\Map\HandlerDescriptor;
 use Componenta\Tokenizer\ClassInfo;
 
-final readonly class CompilerTestCommand
-{
-}
+use function Componenta\Config\config_merge;
+
+final readonly class CompilerTestCommand {}
 
 #[AsCommandHandler]
 final readonly class CompilerTestHandler
 {
-    public function __invoke(CompilerTestCommand $command): void
+    public function __invoke(CompilerTestCommand $command): void {}
+}
+
+final readonly class CompilerTestMapProvider implements CqrsMapProviderInterface
+{
+    public function __construct(private CqrsMap $map = new CqrsMap()) {}
+
+    public function map(): CqrsMap
     {
+        return $this->map;
     }
 }
 
-it('compiles one compact versioned map from a finalized discovery index', function (): void {
+function compilerTestIndex(): CqrsDiscoveryIndex
+{
     $index = new CqrsDiscoveryIndex();
     $index->handle(new ClassInfo(CompilerTestHandler::class));
     $index->finalize();
-    $compiler = new CqrsMapCompiler();
+
+    return $index;
+}
+
+function compilerTestEffectiveProvider(
+    CqrsDiscoveryIndex $index,
+    ?CqrsMap $configured = null,
+): CqrsMapProviderInterface {
+    return new CompositeCqrsMapProvider(
+        new CompilerTestMapProvider($configured ?? CqrsMap::empty()),
+        new DiscoveryCqrsMapProvider($index),
+    );
+}
+
+it('compiles the effective runtime map from a finalized discovery index', function (): void {
+    $index = compilerTestIndex();
+    $compiler = new CqrsMapCompiler(compilerTestEffectiveProvider($index));
 
     $result = $compiler->compile($index, 'unused');
 
@@ -51,11 +79,12 @@ it('compiles one compact versioned map from a finalized discovery index', functi
         ->and($result->files)->toBe([]);
 });
 
-it('emits only the version for an empty map instead of empty sections', function (): void {
+it('emits only the version for an empty effective map', function (): void {
     $index = new CqrsDiscoveryIndex();
     $index->finalize();
+    $provider = new CompilerTestMapProvider();
 
-    $result = (new CqrsMapCompiler())->compile($index, '');
+    $result = (new CqrsMapCompiler($provider))->compile($index, '');
 
     expect($result->configKey)->toBe(ConfigKey::CQRS_MAP)
         ->and($result->configValue)->toBe(['version' => CqrsMap::VERSION]);
@@ -63,7 +92,7 @@ it('emits only the version for an empty map instead of empty sections', function
 
 it('does not finalize discovery implicitly and rejects unsupported listeners', function (): void {
     $index = new CqrsDiscoveryIndex();
-    $compiler = new CqrsMapCompiler();
+    $compiler = new CqrsMapCompiler(new DiscoveryCqrsMapProvider($index));
 
     expect(fn() => $compiler->compile($index, ''))
         ->toThrow(LogicException::class, 'not finalized')
@@ -72,23 +101,29 @@ it('does not finalize discovery implicitly and rejects unsupported listeners', f
         ->toThrow(InvalidArgumentException::class, 'supports only');
 });
 
-it('merges the configured base map before emitting the compiled discovery map', function (): void {
-    $base = new class implements CqrsMapProviderInterface {
-        public function map(): CqrsMap
-        {
-            return new CqrsMap(commandHandlers: [
-                'manual.command' => new HandlerDescriptor('manual.handler', 'handle'),
-            ]);
-        }
-    };
-    $index = new CqrsDiscoveryIndex();
-    $index->handle(new ClassInfo(CompilerTestHandler::class));
-    $index->finalize();
+it('marks a full effective map so generic build merging replaces numeric indexes', function (): void {
+    $configured = new CqrsMap(
+        commandHandlers: [
+            'manual.command' => new HandlerDescriptor('manual.handler', 'handle'),
+        ],
+    );
+    $index = compilerTestIndex();
+    $provider = compilerTestEffectiveProvider($index, $configured);
+    $result = (new CqrsMapCompiler(
+        $provider,
+        configuredMapPresent: true,
+    ))->compile($index, '');
 
-    $result = (new CqrsMapCompiler($base))->compile($index, '');
-    $map = CqrsMap::fromArray($result->configValue);
+    expect($result->configValue[ConfigMergeKey::OVERRIDE_INDEXES])->toBeTrue();
 
-    expect($map->commandHandler('manual.command')?->service)->toBe('manual.handler')
-        ->and($map->commandHandler(CompilerTestCommand::class)?->service)
+    $compiled = config_merge(
+        $configured->toArray(),
+        $result->configValue,
+    );
+
+    expect($compiled)->toBe($provider->map()->toArray())
+        ->and(CqrsMap::fromArray($compiled)->commandHandler('manual.command')?->service)
+        ->toBe('manual.handler')
+        ->and(CqrsMap::fromArray($compiled)->commandHandler(CompilerTestCommand::class)?->service)
         ->toBe(CompilerTestHandler::class);
 });
