@@ -352,7 +352,17 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         }
 
         foreach (array_slice($method->getParameters(), 1) as $additional) {
-            if (!$additional->isOptional() && !$additional->isVariadic()) {
+            if ($additional->isPassedByReference() || $additional->isVariadic()) {
+                throw new InvalidDiscoveryDeclarationException(sprintf(
+                    'CQRS %s handler "%s::%s" cannot declare additional variadic or by-reference parameter "$%s".',
+                    $kind,
+                    $method->getDeclaringClass()->getName(),
+                    $method->getName(),
+                    $additional->getName(),
+                ));
+            }
+
+            if (!$additional->isOptional()) {
                 throw new InvalidDiscoveryDeclarationException(sprintf(
                     'CQRS %s handler "%s::%s" cannot require additional parameter "$%s"; the runtime supplies only the message.',
                     $kind,
