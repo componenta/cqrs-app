@@ -173,6 +173,22 @@ final readonly class DiscoveryRequiredSecondParameterHandler
     }
 }
 
+final readonly class DiscoveryAdditionalVariadicHandler
+{
+    #[AsCommandHandler(command: DiscoveryCommandA::class)]
+    public function handle(DiscoveryCommandA $command, string ...$extra): void
+    {
+    }
+}
+
+final class DiscoveryAdditionalByReferenceHandler
+{
+    #[AsQueryHandler(query: DiscoveryQueryA::class)]
+    public function handle(DiscoveryQueryA $query, ?string &$optional = null): void
+    {
+    }
+}
+
 final readonly class DiscoveryScalarMessageHandler
 {
     #[AsCommandHandler(command: 'logical.command')]
@@ -351,6 +367,14 @@ it('rejects invalid handler method declarations and ambiguous inference', functi
     'required second parameter' => [
         DiscoveryRequiredSecondParameterHandler::class,
         'cannot require additional parameter',
+    ],
+    'additional variadic parameter' => [
+        DiscoveryAdditionalVariadicHandler::class,
+        'additional variadic or by-reference parameter',
+    ],
+    'additional by-reference parameter' => [
+        DiscoveryAdditionalByReferenceHandler::class,
+        'additional variadic or by-reference parameter',
     ],
     'scalar message parameter with explicit alias' => [
         DiscoveryScalarMessageHandler::class,
