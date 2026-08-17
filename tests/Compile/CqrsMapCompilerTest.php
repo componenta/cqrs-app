@@ -7,7 +7,10 @@ use Componenta\CQRS\App\Compile\CqrsMapCompiler;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
 use Componenta\CQRS\App\Map\DiscoveryCqrsMapProvider;
 use Componenta\CQRS\Command\Attribute\AsCommandHandler;
+use Componenta\CQRS\Command\Event\CommandProcessedEvent;
 use Componenta\CQRS\ConfigKey;
+use Componenta\CQRS\Map\CommandListenerDescriptor;
+use Componenta\CQRS\Map\CommandMetadataDescriptor;
 use Componenta\CQRS\Map\CompositeCqrsMapProvider;
 use Componenta\CQRS\Map\CqrsMap;
 use Componenta\CQRS\Map\CqrsMapProviderInterface;
@@ -22,6 +25,15 @@ final readonly class CompilerTestCommand {}
 final readonly class CompilerTestHandler
 {
     public function __invoke(CompilerTestCommand $command): void {}
+}
+
+#[Attribute(Attribute::TARGET_CLASS)]
+final readonly class CompilerTestMetadata
+{
+    public function __construct(
+        public int $attempts,
+        public int $delay,
+    ) {}
 }
 
 final readonly class CompilerTestMapProvider implements CqrsMapProviderInterface
@@ -105,6 +117,23 @@ it('marks a full effective map so generic build merging replaces numeric indexes
     $configured = new CqrsMap(
         commandHandlers: [
             'manual.command' => new HandlerDescriptor('manual.handler', 'handle'),
+        ],
+        commandListeners: [
+            'manual.command' => [
+                new CommandListenerDescriptor(
+                    'manual.listener',
+                    [CommandProcessedEvent::class],
+                    10,
+                ),
+            ],
+        ],
+        commandMetadata: [
+            'manual.command' => [
+                CompilerTestMetadata::class => new CommandMetadataDescriptor(
+                    CompilerTestMetadata::class,
+                    [3, 100],
+                ),
+            ],
         ],
     );
     $index = compilerTestIndex();
