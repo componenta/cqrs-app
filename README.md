@@ -15,9 +15,10 @@ composer require componenta/cqrs-app
 | Dependency | Purpose |
 |---|---|
 | PHP `^8.4` | Modern language features and strict types. |
-| `componenta/class-finder` | Class discovery and listener compiler integration. |
-| `componenta/config` | Config provider integration. |
-| `componenta/cqrs` | Core CQRS runtime contracts and config keys. |
+| `componenta/app` | Application discovery and production build integration. |
+| `componenta/class-finder` | Class discovery and listener compiler contracts. |
+| `componenta/config` | Configuration and factory integration. |
+| `componenta/cqrs` | Core CQRS runtime, map contracts, and config keys. |
 | `componenta/tokenizer` | Supplies `ClassInfo` and its existing reflector to discovery. |
 | `psr/container` | Service lookup. |
 
@@ -25,10 +26,10 @@ composer require componenta/cqrs-app
 
 | Config section | Entries |
 |---|---|
-| `factories` | One `CqrsDiscoveryIndex`, one application map provider, and application-aware factories for the three locator interfaces. |
-| `invokables` | One `CqrsMapCompiler`. |
+| `factories` | `CqrsDiscoveryIndex`, `CqrsMapCompiler`, and the application implementation of `CqrsMapProviderInterface`. |
 | `ClassFinderConfigKey::LISTENERS` | The single `CqrsDiscoveryIndex` listener. |
-| `CompileConfigKey::LISTENER_COMPILERS` | The single compiler that emits `ConfigKey::CQRS_MAP`. |
+| `CompileConfigKey::LISTENER_COMPILERS` | The compiler that emits `ConfigKey::CQRS_MAP`. |
+| `AppConfigKey::AUTOWIRE_ENTRY_CONTRIBUTORS` | The discovery index that contributes discovered handlers and listeners to DI compilation. |
 
 ## Usage
 
@@ -41,7 +42,9 @@ return [
 ];
 ```
 
-Both packages bind the locator interfaces directly through factories. Provider order is therefore the explicit implementation-selection mechanism: `cqrs-app` replaces the three core locator factories with application-aware ones. It does not call core factories manually. A later application provider may deliberately select another implementation, and delegators registered for the same requested id still wrap that result.
+`componenta/cqrs` provides the standalone `CqrsMapProviderInterface` binding backed by configured data. `componenta/cqrs-app` replaces that one binding with an application factory. In development the factory returns a composite of the configured and discovered maps; outside development it returns the configured provider reading the compiled map.
+
+All core runtime consumers continue to depend on the same `CqrsMapProviderInterface`: command, query and listener locators, command metadata, and the compiler therefore observe one effective map.
 
 Use discovery attributes in application code:
 
@@ -53,18 +56,18 @@ final readonly class PublishPostHandler
 {
     public function __invoke(PublishPostCommand $command): void
     {
-        // handle command
+        // Handle command.
     }
 }
 ```
 
 ## Discovery And Metadata
 
-`CqrsDiscoveryIndex` reads `ClassInfo::$reflector` once per class and collects command handlers, query handlers, listeners, known command names, and configured command metadata attributes. It validates public non-static handler methods, rejects conflicting handlers, deduplicates identical listeners, and performs sorting once in `finalize()`.
+`CqrsDiscoveryIndex` reads `ClassInfo::$reflector` once per class and collects command handlers, query handlers, listeners, known command names, and configured command metadata attributes. It validates public non-static handler methods, rejects conflicting handlers, deduplicates identical listeners, and performs deterministic sorting in `finalize()`.
 
 Optional packages add metadata without changing the compiler by appending an attribute class to `ConfigKey::COMMAND_METADATA_ATTRIBUTES`. The factory validates that every entry exists and is declared with `#[Attribute]`.
 
-`ConfigKey::DISCOVERY_ENABLED` may explicitly enable or disable the live overlay. When omitted, discovery is enabled in every environment except exact `APP_ENV=production`; `test` and `staging` therefore remain non-production.
+`ConfigKey::DISCOVERY_ENABLED` may explicitly enable or disable the live overlay. When omitted, live discovery is enabled only for exact `APP_ENV=development`. Every other environment requires a compiled CQRS map and rejects an attempt to enable runtime discovery.
 
 ## Production Build
 
@@ -74,9 +77,11 @@ With `componenta/app-console`, build the artifact before starting production:
 APP_ENV=development php bin/console.php app:build
 ```
 
-The compiler writes one deterministic CQRS map v2 into the application config cache. Production locators read that map without scanning application classes. Metadata for a known compiled command never falls back to reflection; an unknown command may still use the reflection provider.
+The application provider first produces the same effective map used by development dispatch: configured map plus discovery map, merged through `CqrsMap::merge()`. `CqrsMapCompiler` serializes that effective map as one deterministic versioned artifact. The build merge replaces numeric descriptor positions instead of appending the configured portion a second time.
 
-An old CQRS key, unsupported map version, or missing production map fails with an instruction to clear caches and rebuild. After upgrading from v1, remove the config, discovery, old CQRS, and legacy container caches before running `app:build`.
+Production reads the resulting complete artifact through the same `CqrsMapProviderInterface`, without scanning application classes. Metadata for a known compiled command never falls back to reflection; an unknown command may still use the reflection provider.
+
+An old CQRS key, unsupported map version, or missing non-development map fails with an instruction to clear caches and rebuild. After upgrading from v1, remove the config, discovery, old CQRS, and legacy container caches before running `app:build`.
 
 ## Optional Runtime Packages
 
