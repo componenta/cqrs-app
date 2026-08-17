@@ -1,8 +1,8 @@
 # Componenta CQRS App
 
-`componenta/cqrs-app` добавляет application-level discovery и build-time map compilation для `componenta/cqrs`.
+`componenta/cqrs-app` добавляет discovery уровня приложения и компиляцию CQRS-карты для `componenta/cqrs`.
 
-Пакет не содержит runtime middleware, транспорты или console workers. Для этих задач устанавливайте отдельные CQRS packages.
+Пакет не содержит runtime middleware, транспорты или console workers. Для этих задач устанавливаются отдельные CQRS-пакеты.
 
 ## Установка
 
@@ -15,20 +15,21 @@ composer require componenta/cqrs-app
 | Зависимость | Назначение |
 |---|---|
 | PHP `^8.4` | Современные возможности языка и strict types. |
-| `componenta/class-finder` | Class discovery и listener compiler integration. |
-| `componenta/config` | Интеграция с config provider. |
-| `componenta/cqrs` | Core CQRS runtime contracts и config keys. |
-| `componenta/tokenizer` | Передаёт discovery объект `ClassInfo` с уже созданным reflector. |
+| `componenta/app` | Application discovery и production build. |
+| `componenta/class-finder` | Контракты class discovery и listener compiler. |
+| `componenta/config` | Конфигурация и фабрики. |
+| `componenta/cqrs` | Core CQRS runtime, карта и config keys. |
+| `componenta/tokenizer` | Передаёт `ClassInfo` с уже созданным reflector. |
 | `psr/container` | Получение сервисов. |
 
 ## Что регистрирует пакет
 
-| Config section | Entries |
+| Раздел конфигурации | Entries |
 |---|---|
-| `factories` | Один `CqrsDiscoveryIndex`, один application map provider и application-aware фабрики для трёх interface локаторов. |
-| `invokables` | Один `CqrsMapCompiler`. |
+| `factories` | `CqrsDiscoveryIndex`, `CqrsMapCompiler` и application-реализация `CqrsMapProviderInterface`. |
 | `ClassFinderConfigKey::LISTENERS` | Единственный listener `CqrsDiscoveryIndex`. |
-| `CompileConfigKey::LISTENER_COMPILERS` | Единственный compiler, создающий `ConfigKey::CQRS_MAP`. |
+| `CompileConfigKey::LISTENER_COMPILERS` | Compiler, создающий `ConfigKey::CQRS_MAP`. |
+| `AppConfigKey::AUTOWIRE_ENTRY_CONTRIBUTORS` | Discovery index, добавляющий найденные handlers и listeners в DI compilation. |
 
 ## Использование
 
@@ -41,9 +42,11 @@ return [
 ];
 ```
 
-Оба пакета привязывают interface локаторов непосредственно через фабрики. Порядок провайдеров явно выбирает реализацию: `cqrs-app` заменяет три core-фабрики своими application-aware реализациями и не вызывает core-фабрики вручную. Более поздний provider приложения может намеренно выбрать другую реализацию; delegator-ы для того же requested id по-прежнему обернут результат.
+`componenta/cqrs` предоставляет standalone binding `CqrsMapProviderInterface`, читающий карту из конфигурации. `componenta/cqrs-app` заменяет только этот binding своей application factory. В development factory возвращает composite из configured и discovered maps; вне development возвращается configured provider, читающий полную compiled map.
 
-Используйте discovery attributes в application code:
+Все runtime-компоненты продолжают зависеть от одного `CqrsMapProviderInterface`: command, query и listener locators, command metadata и compiler используют одну effective map.
+
+Используйте discovery attributes в коде приложения:
 
 ```php
 use Componenta\CQRS\Command\Attribute\AsCommandHandler;
@@ -53,18 +56,18 @@ final readonly class PublishPostHandler
 {
     public function __invoke(PublishPostCommand $command): void
     {
-        // handle command
+        // Обработка команды.
     }
 }
 ```
 
 ## Discovery и метаданные
 
-`CqrsDiscoveryIndex` один раз читает `ClassInfo::$reflector` для каждого класса и собирает обработчики команд и запросов, слушатели, имена известных команд и настроенные атрибуты метаданных. Он проверяет, что методы обработчиков публичные и нестатические, отклоняет конфликты, удаляет одинаковых слушателей и сортирует данные один раз в `finalize()`.
+`CqrsDiscoveryIndex` один раз читает `ClassInfo::$reflector` для каждого класса и собирает command handlers, query handlers, listeners, известные имена команд и настроенные metadata attributes. Он проверяет public non-static методы, отклоняет конфликты, удаляет одинаковые listener descriptors и детерминированно сортирует данные в `finalize()`.
 
-Дополнительные пакеты добавляют метаданные без изменения compiler: они дополняют `ConfigKey::COMMAND_METADATA_ATTRIBUTES` классом атрибута. Factory проверяет существование каждого класса и наличие `#[Attribute]`.
+Дополнительные пакеты добавляют metadata без изменения compiler, дополняя `ConfigKey::COMMAND_METADATA_ATTRIBUTES` классом атрибута. Factory проверяет существование каждого класса и наличие `#[Attribute]`.
 
-`ConfigKey::DISCOVERY_ENABLED` позволяет явно включить или выключить live overlay. По умолчанию discovery включён во всех окружениях, кроме точного `APP_ENV=production`; `test` и `staging` остаются non-production.
+`ConfigKey::DISCOVERY_ENABLED` позволяет явно включить или выключить live overlay. По умолчанию live discovery включён только при точном `APP_ENV=development`. Любое другое окружение требует compiled CQRS map и запрещает включение runtime discovery.
 
 ## Сборка для production
 
@@ -74,9 +77,11 @@ final readonly class PublishPostHandler
 APP_ENV=development php bin/console.php app:build
 ```
 
-Compiler записывает одну детерминированную CQRS map v2 в config cache приложения. Production-локаторы читают её без сканирования классов. Метаданные известной скомпилированной команды не используют reflection fallback; для неизвестной команды fallback допустим.
+Application provider сначала формирует ту же effective map, которую использует development dispatch: configured map плюс discovery map, объединённые через `CqrsMap::merge()`. `CqrsMapCompiler` сериализует эту карту как один детерминированный versioned artifact. При записи build заменяет numeric positions descriptors, а не добавляет configured-часть второй раз.
 
-Старый CQRS key, неподдерживаемая версия карты или отсутствующая production map приводят к ошибке с указанием очистить cache и повторить build. При переходе с v1 удалите кеши конфигурации, discovery, старых CQRS maps и старые кеши контейнера перед запуском `app:build`.
+Production читает готовый полный artifact через тот же `CqrsMapProviderInterface` без сканирования классов. Metadata известной compiled-команды не используют reflection fallback; для неизвестной команды fallback допустим.
+
+Старый CQRS key, неподдерживаемая версия карты или отсутствующая карта вне development приводят к ошибке с указанием очистить cache и повторить build. При переходе с v1 удалите кеши конфигурации, discovery, старых CQRS maps и legacy container caches перед запуском `app:build`.
 
 ## Optional Runtime Packages
 
