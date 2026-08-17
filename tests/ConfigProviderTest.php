@@ -6,21 +6,15 @@ use Componenta\App\ConfigKey as AppConfigKey;
 use Componenta\ClassFinder\Compile\ConfigKey as CompileConfigKey;
 use Componenta\ClassFinder\ConfigKey as ClassFinderConfigKey;
 use Componenta\Config\ConfigKey as DependencyConfigKey;
-use Componenta\CQRS\App\Command\Factory\CommandHandlerLocatorFactory;
-use Componenta\CQRS\App\Command\Factory\CommandListenersLocatorFactory;
 use Componenta\CQRS\App\Compile\CqrsMapCompiler;
 use Componenta\CQRS\App\Compile\Factory\CqrsMapCompilerFactory;
 use Componenta\CQRS\App\ConfigProvider;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
 use Componenta\CQRS\App\Discovery\Factory\CqrsDiscoveryIndexFactory;
-use Componenta\CQRS\App\Map\ApplicationCqrsMapProvider;
 use Componenta\CQRS\App\Map\Factory\ApplicationCqrsMapProviderFactory;
-use Componenta\CQRS\App\Query\Factory\QueryHandlerLocatorFactory;
-use Componenta\CQRS\Command\Locator\CommandHandlerLocatorInterface;
-use Componenta\CQRS\Command\Locator\CommandListenersLocatorInterface;
-use Componenta\CQRS\Query\Locator\QueryHandlerLocatorInterface;
+use Componenta\CQRS\Map\CqrsMapProviderInterface;
 
-it('registers one discovery listener and one compiler with application locator factories', function (): void {
+it('rebinds the shared CQRS map provider and registers discovery compilation', function (): void {
     $config = (new ConfigProvider())();
     $dependencies = $config[DependencyConfigKey::DEPENDENCIES];
 
@@ -36,12 +30,7 @@ it('registers one discovery listener and one compiler with application locator f
         ->toBe([
             CqrsMapCompiler::class => CqrsMapCompilerFactory::class,
             CqrsDiscoveryIndex::class => CqrsDiscoveryIndexFactory::class,
-            ApplicationCqrsMapProvider::class => ApplicationCqrsMapProviderFactory::class,
-            QueryHandlerLocatorInterface::class => QueryHandlerLocatorFactory::class,
-            CommandHandlerLocatorInterface::class => CommandHandlerLocatorFactory::class,
-            CommandListenersLocatorInterface::class => CommandListenersLocatorFactory::class,
+            CqrsMapProviderInterface::class => ApplicationCqrsMapProviderFactory::class,
         ])
         ->and($dependencies[DependencyConfigKey::ALIASES] ?? [])->toBe([]);
 });
-
-
