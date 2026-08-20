@@ -14,7 +14,8 @@
         "psr/container": "^2.0"
     },
     "require-dev": {
-        "pestphp/pest": "^4.0"
+        "pestphp/pest": "^4.0",
+        "phpstan/phpstan": "^2.0"
     },
     "suggest": {
         "componenta/cqrs-lock": "Adds lock metadata and command locking.",
@@ -46,7 +47,8 @@
         }
     },
     "scripts": {
-        "test": "@php vendor/bin/pest"
+        "test": "@php vendor/bin/pest",
+        "analyse": "@php vendor/bin/phpstan analyse src --level=max"
     },
     "prefer-stable": true
 }
