@@ -50,6 +50,8 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
 
     private ?CqrsMap $map = null;
 
+    private bool $metadataAttributesValidated = false;
+
     public bool $finalized {
         get => $this->map !== null;
     }
@@ -67,6 +69,7 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
             throw ListenerAlreadyFinalizedException::forListener($this);
         }
 
+        $this->validateMetadataAttributes();
         $reflector = $info->reflector;
 
         $this->discoverHandlers(
@@ -545,11 +548,12 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         }
     }
 
-    /**
-     * @param ReflectionClass<object> $reflector
-     */
-    private function discoverMetadata(ReflectionClass $reflector): void
+    private function validateMetadataAttributes(): void
     {
+        if ($this->metadataAttributesValidated) {
+            return;
+        }
+
         foreach ($this->metadataAttributes as $attributeClass) {
             if (!class_exists($attributeClass)) {
                 throw new InvalidDiscoveryDeclarationException(sprintf(
@@ -568,14 +572,23 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
                 ));
             }
 
-            $flags = $attributeMetadata[0]->newInstance()->flags;
-            if (($flags & Attribute::TARGET_CLASS) === 0) {
+            if (($attributeMetadata[0]->newInstance()->flags & Attribute::TARGET_CLASS) === 0) {
                 throw new InvalidDiscoveryDeclarationException(sprintf(
                     'Command metadata attribute "%s" must allow class targets.',
                     $attributeClass,
                 ));
             }
+        }
 
+        $this->metadataAttributesValidated = true;
+    }
+
+    /**
+     * @param ReflectionClass<object> $reflector
+     */
+    private function discoverMetadata(ReflectionClass $reflector): void
+    {
+        foreach ($this->metadataAttributes as $attributeClass) {
             $attributes = $reflector->getAttributes($attributeClass);
 
             if ($attributes === []) {
