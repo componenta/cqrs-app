@@ -79,7 +79,7 @@ APP_ENV=development php bin/console.php app:build
 
 The application provider first produces the same effective map used by development dispatch: configured map plus discovery map, merged through `CqrsMap::merge()`. `CqrsMapCompiler` serializes that effective map as one deterministic versioned artifact. The build merge replaces numeric descriptor positions instead of appending the configured portion a second time.
 
-Production reads the resulting complete artifact through the same `CqrsMapProviderInterface`, without scanning application classes. Metadata for a known compiled command never falls back to reflection; an unknown command may still use the reflection provider.
+Production reads the resulting complete artifact through the same `CqrsMapProviderInterface`, without scanning application classes. `componenta/cqrs-app` itself never supplies a production reflection fallback. When paired with CQRS v4, the standard metadata provider is strictly map-backed in every environment, so metadata missing from the effective/compiled map remains absent at runtime. Applications that intentionally choose `ReflectionCommandMetadataProvider` are opting into a different core metadata contract explicitly.
 
 An old CQRS key, unsupported map version, or missing non-development map fails with an instruction to clear caches and rebuild. After upgrading from v1, remove the config, discovery, old CQRS, and legacy container caches before running `app:build`.
 
