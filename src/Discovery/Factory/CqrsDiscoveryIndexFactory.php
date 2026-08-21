@@ -44,12 +44,24 @@ final class CqrsDiscoveryIndexFactory
                     is_scalar($attribute) ? (string) $attribute : get_debug_type($attribute),
                 ));
             }
+
             if (isset($seen[$attribute])) {
                 continue;
             }
-            if ((new ReflectionClass($attribute))->getAttributes(Attribute::class) === []) {
+
+            $reflection = new ReflectionClass($attribute);
+            $declarations = $reflection->getAttributes(Attribute::class);
+
+            if ($declarations === []) {
                 throw new InvalidArgumentException(sprintf(
                     'CQRS command metadata class "%s" is not declared with #[Attribute].',
+                    $attribute,
+                ));
+            }
+
+            if (($declarations[0]->newInstance()->flags & Attribute::TARGET_CLASS) === 0) {
+                throw new InvalidArgumentException(sprintf(
+                    'CQRS command metadata attribute "%s" must allow class targets.',
                     $attribute,
                 ));
             }
