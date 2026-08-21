@@ -65,9 +65,9 @@ final readonly class PublishPostHandler
 
 `CqrsDiscoveryIndex` reads `ClassInfo::$reflector` once per class and collects command handlers, query handlers, listeners, known command names, and configured command metadata attributes. It validates public non-static handler methods, rejects conflicting handlers, deduplicates identical listeners, and performs deterministic sorting in `finalize()`.
 
-Optional packages add metadata without changing the compiler by appending an attribute class to `ConfigKey::COMMAND_METADATA_ATTRIBUTES`. The factory validates that every entry exists and is declared with `#[Attribute]`.
+Optional packages add metadata without changing the compiler by appending an attribute class to `ConfigKey::COMMAND_METADATA_ATTRIBUTES`. The configuration boundary validates that every entry exists, is declared with `#[Attribute]`, and allows class targets before class discovery begins. The discovery index keeps the same invariant for direct construction while avoiding repeated declaration reflection for every discovered class.
 
-`ConfigKey::DISCOVERY_ENABLED` may explicitly enable or disable the live overlay. When omitted, live discovery is enabled only for exact `APP_ENV=development`. Every other environment requires a compiled CQRS map and rejects an attempt to enable runtime discovery.
+`ConfigKey::DISCOVERY_ENABLED` may explicitly enable or disable the live overlay. When the flag is omitted, discovery follows the application environment default: a missing environment/`APP_ENV` is treated as development, and explicit `APP_ENV=development` is also development. Any explicit non-development environment such as `production`, `staging`, or `test` requires a compiled CQRS map and rejects an attempt to enable runtime discovery.
 
 ## Production Build
 
