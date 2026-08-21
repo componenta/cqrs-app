@@ -65,9 +65,9 @@ final readonly class PublishPostHandler
 
 `CqrsDiscoveryIndex` один раз читает `ClassInfo::$reflector` для каждого класса и собирает command handlers, query handlers, listeners, известные имена команд и настроенные metadata attributes. Он проверяет public non-static методы, отклоняет конфликты, удаляет одинаковые listener descriptors и детерминированно сортирует данные в `finalize()`.
 
-Дополнительные пакеты добавляют metadata без изменения compiler, дополняя `ConfigKey::COMMAND_METADATA_ATTRIBUTES` классом атрибута. Factory проверяет существование каждого класса и наличие `#[Attribute]`.
+Дополнительные пакеты добавляют metadata без изменения compiler, дополняя `ConfigKey::COMMAND_METADATA_ATTRIBUTES` классом атрибута. На границе конфигурации проверяется, что каждый класс существует, объявлен с `#[Attribute]` и разрешает применение к классам. Discovery index сохраняет тот же инвариант при прямом создании, но не повторяет reflection декларации атрибута для каждого найденного класса.
 
-`ConfigKey::DISCOVERY_ENABLED` позволяет явно включить или выключить live overlay. По умолчанию live discovery включён только при точном `APP_ENV=development`. Любое другое окружение требует compiled CQRS map и запрещает включение runtime discovery.
+`ConfigKey::DISCOVERY_ENABLED` позволяет явно включить или выключить live overlay. Если флаг не указан, используется стандартная семантика окружения приложения: отсутствие environment/`APP_ENV` считается development, как и явное `APP_ENV=development`. Любое явно заданное non-development окружение — например `production`, `staging` или `test` — требует compiled CQRS map и запрещает включение runtime discovery.
 
 ## Сборка для production
 
@@ -79,7 +79,7 @@ APP_ENV=development php bin/console.php app:build
 
 Application provider сначала формирует ту же effective map, которую использует development dispatch: configured map плюс discovery map, объединённые через `CqrsMap::merge()`. `CqrsMapCompiler` сериализует эту карту как один детерминированный versioned artifact. При записи build заменяет numeric positions descriptors, а не добавляет configured-часть второй раз.
 
-Production читает готовый полный artifact через тот же `CqrsMapProviderInterface` без сканирования классов. Metadata известной compiled-команды не используют reflection fallback; для неизвестной команды fallback допустим.
+Production читает готовый полный artifact через тот же `CqrsMapProviderInterface` без сканирования классов. `componenta/cqrs-app` сам не добавляет production reflection fallback. В паре с CQRS v4 стандартный metadata provider строго map-backed во всех окружениях: metadata, которой нет в effective/compiled map, остаётся отсутствующей и в runtime. Приложение может явно выбрать `ReflectionCommandMetadataProvider`, но это уже другой, осознанно выбранный core metadata contract.
 
 Старый CQRS key, неподдерживаемая версия карты или отсутствующая карта вне development приводят к ошибке с указанием очистить cache и повторить build. При переходе с v1 удалите кеши конфигурации, discovery, старых CQRS maps и legacy container caches перед запуском `app:build`.
 
