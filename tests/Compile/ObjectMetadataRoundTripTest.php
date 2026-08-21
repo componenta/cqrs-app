@@ -56,13 +56,15 @@ it('round-trips object-valued command metadata through the production config art
         throw new RuntimeException('Unable to create object metadata cache file.');
     }
 
+    $production = new Environment(['APP_ENV' => 'production']);
+
     try {
         $config = ConfigLoader::load(
-            new Environment(['APP_ENV' => 'production']),
+            $production,
             static fn(): array => [ConfigKey::CQRS_MAP => $compiled],
         );
         ConfigLoader::export($config, $cacheFile);
-        $loaded = ConfigLoader::loadFromFile($cacheFile);
+        $loaded = ConfigLoader::loadFromFile($cacheFile, $production);
         $restored = CqrsMap::fromArray($loaded->get(ConfigKey::CQRS_MAP));
         $descriptor = $restored->commandMetadata(
             ObjectRoundTripCommand::class,
