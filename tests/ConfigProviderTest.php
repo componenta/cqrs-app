@@ -6,6 +6,7 @@ use Componenta\App\ConfigKey as AppConfigKey;
 use Componenta\ClassFinder\Compile\ConfigKey as CompileConfigKey;
 use Componenta\ClassFinder\ConfigKey as ClassFinderConfigKey;
 use Componenta\Config\ConfigKey as DependencyConfigKey;
+use Componenta\CQRS\App\Compile\CqrsMapAutowireEntryContributor;
 use Componenta\CQRS\App\Compile\CqrsMapCompiler;
 use Componenta\CQRS\App\Compile\Factory\CqrsMapCompilerFactory;
 use Componenta\CQRS\App\ConfigProvider;
@@ -23,7 +24,7 @@ it('rebinds the shared CQRS map provider and registers discovery compilation', f
         ->and($config[ClassFinderConfigKey::LISTENERS])
         ->toBe([CqrsDiscoveryIndex::class])
         ->and($config[AppConfigKey::AUTOWIRE_ENTRY_CONTRIBUTORS])
-        ->toBe([CqrsDiscoveryIndex::class])
+        ->toBe([CqrsMapAutowireEntryContributor::class])
         ->and($dependencies[DependencyConfigKey::INVOKABLES] ?? [])
         ->toBe([])
         ->and($dependencies[DependencyConfigKey::FACTORIES])
