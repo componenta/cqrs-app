@@ -25,7 +25,7 @@ jobs:
           tools: composer:v2
       - name: Check out companion packages
         run: |
-          for package in $(php -r '$manifest = json_decode(file_get_contents("cqrs-app/integration/composer.json"), true, flags: JSON_THROW_ON_ERROR); foreach (array_keys($manifest["require"]) as $package) { if (str_starts_with($package, "componenta/") && $package !== "componenta/cqrs-app") { echo substr($package, 10), PHP_EOL; } }'); do
+          for package in $(php -r '$manifest = json_decode(file_get_contents("cqrs-app/integration/composer.json"), true, flags: JSON_THROW_ON_ERROR); foreach (array_keys($manifest["require"]) as $package) { if (str_starts_with($package, "componenta/") && $package !== "componenta/cqrs-app") { echo substr($package, strlen("componenta/")), PHP_EOL; } }'); do
             git clone --depth 1 --branch main "https://github.com/componenta/$package.git" "$package"
           done
       - name: Install integration dependencies
