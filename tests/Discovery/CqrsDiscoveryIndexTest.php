@@ -10,7 +10,7 @@ use Componenta\CQRS\Command\Event\CommandFailedEvent;
 use Componenta\CQRS\Command\Event\CommandListenerInterface;
 use Componenta\CQRS\Command\Event\CommandProcessedEvent;
 use Componenta\CQRS\Command\Event\CommandProcessEvent;
-use Componenta\CQRS\Map\CqrsMap;
+use Componenta\ClassFinder\ClassIterator;
 use Componenta\CQRS\Query\Attribute\AsQueryHandler;
 use Componenta\Tokenizer\ClassInfo;
 
@@ -247,61 +247,48 @@ final class DiscoveryMethodOnlyMetadata
 {
 }
 
-/**
- * @param list<class-string> $classes
- * @param list<class-string> $metadata
- */
-function finalizedDiscoveryIndex(array $classes, array $metadata = []): CqrsDiscoveryIndex
+/** @param list<class-string> $classes */
+function discoveryIndex(array $classes): CqrsDiscoveryIndex
 {
-    $index = new CqrsDiscoveryIndex($metadata);
-
-    foreach ($classes as $class) {
-        $index->handle(new ClassInfo($class));
-    }
-
-    $index->finalize();
-
-    return $index;
+    return new CqrsDiscoveryIndex(new ClassIterator(
+        (static function () use ($classes): Generator {
+            foreach ($classes as $class) {
+                yield $class => new ClassInfo($class);
+            }
+        })(),
+    ));
 }
 
-it('discovers command, query, listener, and generic metadata descriptors in one pass', function (): void {
+it('discovers command handlers, query handlers and listener registrations in one pass', function (): void {
     DiscoveryMetadata::$instances = 0;
-    $index = finalizedDiscoveryIndex([
+    $index = discoveryIndex([
         DiscoveryClassCommandHandler::class,
         DiscoveryMethodHandlers::class,
         DiscoveryQueryHandlers::class,
         DiscoveryListener::class,
         DiscoveryMetadataCommand::class,
-    ], [DiscoveryMetadata::class]);
-    $artifact = $index->map()->toArray();
+    ]);
+    $artifact = ['command_handlers' => $index->commandHandlers(), 'query_handlers' => $index->queryHandlers(), 'command_listeners' => $index->commandListeners()];
 
-    expect($artifact['commands']['handlers'][DiscoveryCommandA::class])->toBe([
+    expect($artifact['command_handlers'][DiscoveryCommandA::class])->toBe([
         'service' => DiscoveryMethodHandlers::class,
         'method' => 'first',
-    ])->and($artifact['commands']['handlers'][DiscoveryCommandB::class])->toBe([
+    ])->and($artifact['command_handlers'][DiscoveryCommandB::class])->toBe([
         'service' => DiscoveryMethodHandlers::class,
         'method' => 'second',
-    ])->and($artifact['commands']['handlers'][DiscoveryCommandC::class])->toBe([
+    ])->and($artifact['command_handlers'][DiscoveryCommandC::class])->toBe([
         'service' => DiscoveryClassCommandHandler::class,
         'method' => '__invoke',
-    ])->and($artifact['queries']['handlers'][DiscoveryQueryA::class])->toBe([
+    ])->and($artifact['query_handlers'][DiscoveryQueryA::class])->toBe([
         'service' => DiscoveryQueryHandlers::class,
         'method' => 'first',
-    ])->and($artifact['queries']['handlers'][DiscoveryQueryB::class])->toBe([
+    ])->and($artifact['query_handlers'][DiscoveryQueryB::class])->toBe([
         'service' => DiscoveryQueryHandlers::class,
         'method' => 'second',
     ])->and(array_column(
-        $artifact['commands']['listeners'][DiscoveryCommandA::class],
+        $artifact['command_listeners'][DiscoveryCommandA::class],
         'priority',
     ))->toBe([100, -100])
-        ->and($artifact['commands']['metadata'][DiscoveryMetadataCommand::class][DiscoveryMetadata::class])
-        ->toBe(['arguments' => [0 => 'compiled', 'count' => 7]])
-        ->and($artifact['commands']['known'])->toHaveKeys([
-            DiscoveryCommandA::class,
-            DiscoveryCommandB::class,
-            DiscoveryCommandC::class,
-            DiscoveryMetadataCommand::class,
-        ])
         ->and(DiscoveryMetadata::$instances)->toBe(0);
 });
 
@@ -314,34 +301,20 @@ it('produces byte-identical maps regardless of discovery order', function (): vo
         DiscoveryClassCommandHandler::class,
     ];
 
-    $forward = finalizedDiscoveryIndex($classes, [DiscoveryMetadata::class]);
-    $reverse = finalizedDiscoveryIndex(array_reverse($classes), [DiscoveryMetadata::class]);
+    $forward = discoveryIndex($classes);
+    $reverse = discoveryIndex(array_reverse($classes));
 
-    expect(serialize($forward->map()->toArray()))
-        ->toBe(serialize($reverse->map()->toArray()));
-});
-
-it('rejects use before finalization and mutation after finalization', function (): void {
-    $index = new CqrsDiscoveryIndex();
-
-    expect(fn(): CqrsMap => $index->map())
-        ->toThrow(InvalidDiscoveryDeclarationException::class, 'not finalized');
-
-    $index->finalize();
-
-    expect(fn() => $index->finalize())
-        ->toThrow(LogicException::class, 'already finalized')
-        ->and(fn() => $index->handle(new ClassInfo(DiscoveryCommandA::class)))
-        ->toThrow(LogicException::class, 'already finalized');
+    expect(serialize([$forward->commandHandlers(), $forward->queryHandlers(), $forward->commandListeners()]))
+        ->toBe(serialize([$reverse->commandHandlers(), $reverse->queryHandlers(), $reverse->commandListeners()]));
 });
 
 it('rejects invalid handler method declarations and ambiguous inference', function (
     string $class,
     string $message,
 ): void {
-    $index = new CqrsDiscoveryIndex();
+    $index = discoveryIndex([$class]);
 
-    expect(fn() => $index->handle(new ClassInfo($class)))
+    expect(fn () => $index->commandHandlers())
         ->toThrow(InvalidDiscoveryDeclarationException::class, $message);
 })->with([
     'private command method' => [
@@ -399,26 +372,18 @@ it('rejects invalid handler method declarations and ambiguous inference', functi
 ]);
 
 it('does not rediscover inherited method attributes on child services', function (): void {
-    $index = finalizedDiscoveryIndex([
+    $index = discoveryIndex([
         DiscoveryInheritedHandlerBase::class,
         DiscoveryInheritedHandlerChild::class,
     ]);
 
-    expect($index->map()->commandHandler(DiscoveryCommandA::class))->toBeNull();
-});
-
-it('rejects metadata attributes that cannot target command classes', function (): void {
-    $index = new CqrsDiscoveryIndex([DiscoveryMethodOnlyMetadata::class]);
-
-    expect(fn() => $index->handle(new ClassInfo(DiscoveryCommandA::class)))
-        ->toThrow(InvalidDiscoveryDeclarationException::class, 'must allow class targets');
+    expect($index->commandHandlers()[DiscoveryCommandA::class] ?? null)->toBeNull();
 });
 
 it('rejects different handlers for the same message', function (): void {
-    $index = new CqrsDiscoveryIndex();
-    $index->handle(new ClassInfo(DiscoveryDuplicateHandlerA::class));
+    $index = discoveryIndex([DiscoveryDuplicateHandlerA::class, DiscoveryDuplicateHandlerB::class]);
 
-    expect(fn() => $index->handle(new ClassInfo(DiscoveryDuplicateHandlerB::class)))
+    expect(fn () => $index->commandHandlers())
         ->toThrow(
             InvalidDiscoveryDeclarationException::class,
             'Multiple CQRS command handlers',

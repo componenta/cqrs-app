@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php" failOnRisky="true" failOnWarning="true" cacheDirectory=".phpunit.cache">
+    <testsuites><testsuite name="CQRS integration"><directory>tests</directory></testsuite></testsuites>
+</phpunit>

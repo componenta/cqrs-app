@@ -1,0 +1,34 @@
+name: CQRS integration
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.4', '8.5']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cqrs-app
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '${{ matrix.php }}'
+          extensions: mbstring, pdo_sqlite
+          coverage: none
+          tools: composer:v2
+      - name: Check out companion packages
+        run: |
+          for package in app app-console class-finder config cqrs cqrs-lock cqrs-policy cqrs-retry cqrs-transaction-cycle cqrs-transport di error-handler iterator policy; do
+            git clone --depth 1 --branch main "https://github.com/componenta/$package.git" "$package"
+          done
+      - name: Install integration dependencies
+        run: composer --working-dir=cqrs-app/integration install --no-interaction --prefer-dist --no-scripts
+      - name: Test package integration
+        run: composer --working-dir=cqrs-app/integration test

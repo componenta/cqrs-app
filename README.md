@@ -1,8 +1,6 @@
 # Componenta CQRS App
 
-`componenta/cqrs-app` adds application-level discovery and build-time map compilation for `componenta/cqrs`.
-
-It does not contain runtime middleware, transports, or console workers. Install the relevant optional CQRS packages for those concerns.
+`componenta/cqrs-app` discovers handlers and listeners from attributes and builds PHP files containing their registrations. The CQRS buses and locators are provided by [componenta/cqrs](https://github.com/componenta/cqrs).
 
 ## Installation
 
@@ -10,89 +8,120 @@ It does not contain runtime middleware, transports, or console workers. Install 
 composer require componenta/cqrs-app
 ```
 
-## Dependencies
+This API uses PHP 8.4+, App 4, Config 3, DI 5 and CQRS 4. Class Finder supplies the shared class iterator; Tokenizer supplies class reflection; Path Resolver resolves the artifact path. Install App Console 4 to run `app:build`.
 
-| Dependency | Purpose |
-|---|---|
-| PHP `^8.4` | Modern language features and strict types. |
-| `componenta/app` | Application discovery and production build integration. |
-| `componenta/class-finder` | Class discovery and listener compiler contracts. |
-| `componenta/config` | Configuration and factory integration. |
-| `componenta/cqrs` | Core CQRS runtime, map contracts, and config keys. |
-| `componenta/tokenizer` | Supplies `ClassInfo` and its existing reflector to discovery. |
-| `psr/container` | Service lookup. |
-
-## What It Registers
-
-| Config section | Entries |
-|---|---|
-| `factories` | `CqrsDiscoveryIndex`, `CqrsMapCompiler`, and the application implementation of `CqrsMapProviderInterface`. |
-| `ClassFinderConfigKey::LISTENERS` | The single `CqrsDiscoveryIndex` listener. |
-| `CompileConfigKey::LISTENER_COMPILERS` | The compiler that emits `ConfigKey::CQRS_MAP`. |
-| `AppConfigKey::AUTOWIRE_ENTRY_CONTRIBUTORS` | The discovery index that contributes discovered handlers and listeners to DI compilation. |
-
-## Usage
-
-Register the core provider first and the application provider second:
+Register providers in this order:
 
 ```php
 return [
-    new Componenta\CQRS\ConfigProvider(),
-    new Componenta\CQRS\App\ConfigProvider(),
+    new \Componenta\App\ConfigProvider(),
+    new \Componenta\App\Console\ConfigProvider(),
+    new \Componenta\CQRS\ConfigProvider(),
+    new \Componenta\CQRS\App\ConfigProvider(),
+    new ApplicationConfigProvider(),
 ];
 ```
 
-`componenta/cqrs` provides the standalone `CqrsMapProviderInterface` binding backed by configured data. `componenta/cqrs-app` replaces that one binding with an application factory. In development the factory returns a composite of the configured and discovered maps; outside development it returns the configured provider reading the compiled map.
+The existing Composer provider list can register them automatically. Configure application discovery paths through App as usual. App exposes the lazy original class iterator as `Componenta\App\ConfigKey::DISCOVERY_SOURCE` (`app.discovery.source`).
 
-All core runtime consumers continue to depend on the same `CqrsMapProviderInterface`: command, query and listener locators, command metadata, and the compiler therefore observe one effective map.
-
-Use discovery attributes in application code:
+## Handlers and listeners
 
 ```php
 use Componenta\CQRS\Command\Attribute\AsCommandHandler;
 
-#[AsCommandHandler]
-final readonly class PublishPostHandler
+final readonly class PublishPost
 {
-    public function __invoke(PublishPostCommand $command): void
+    public function __construct(public int $id) {}
+}
+
+#[AsCommandHandler]
+final class PublishPostHandler
+{
+    public function __invoke(PublishPost $command): string
     {
-        // Handle command.
+        return 'published:' . $command->id;
     }
 }
 ```
 
-## Discovery And Metadata
+Use `AsQueryHandler` for query handlers. A handler attribute can be declared on the class or on its public, non-static method. A class-level handler uses `__invoke()`, or `handle()` when `__invoke()` is absent. The first parameter identifies the message unless the attribute specifies its name. Required additional parameters are not injected when the handler is invoked.
 
-`CqrsDiscoveryIndex` reads `ClassInfo::$reflector` once per class and collects command handlers, query handlers, listeners, known command names, and configured command metadata attributes. It validates public non-static handler methods, rejects conflicting handlers, deduplicates identical listeners, and performs deterministic sorting in `finalize()`.
+Listeners implement `CommandListenerInterface`:
 
-Optional packages add metadata without changing the compiler by appending an attribute class to `ConfigKey::COMMAND_METADATA_ATTRIBUTES`. The configuration boundary validates that every entry exists, is declared with `#[Attribute]`, and allows class targets before class discovery begins. The discovery index keeps the same invariant for direct construction while avoiding repeated declaration reflection for every discovered class.
+```php
+use Componenta\CQRS\Command\Attribute\AsCommandListener;
+use Componenta\CQRS\Command\Event\CommandFailedEvent;
+use Componenta\CQRS\Command\Event\CommandListenerInterface;
+use Componenta\CQRS\Command\Event\CommandProcessedEvent;
+use Componenta\CQRS\Command\Event\CommandProcessEvent;
 
-`ConfigKey::DISCOVERY_ENABLED` may explicitly enable or disable the live overlay. When the flag is omitted, discovery follows the application environment default: a missing environment/`APP_ENV` is treated as development, and explicit `APP_ENV=development` is also development. Any explicit non-development environment such as `production`, `staging`, or `test` requires a compiled CQRS map and rejects an attempt to enable runtime discovery.
-
-## Production Build
-
-With `componenta/app-console`, build the artifact before starting production:
-
-```bash
-APP_ENV=development php bin/console.php app:build
+#[AsCommandListener(PublishPost::class, priority: 10, eventTypes: [CommandProcessedEvent::class])]
+final class PublishPostListener implements CommandListenerInterface
+{
+    public function handleEvent(CommandProcessEvent|CommandProcessedEvent|CommandFailedEvent $event): void
+    {
+        // React to successful publication.
+    }
+}
 ```
 
-The application provider first produces the same effective map used by development dispatch: configured map plus discovery map, merged through `CqrsMap::merge()`. `CqrsMapCompiler` serializes that effective map as one deterministic versioned artifact. The build merge replaces numeric descriptor positions instead of appending the configured portion a second time.
+Add `EventMiddleware::class` to `Componenta\CQRS\ConfigKey::COMMAND_MIDDLEWARES` to emit lifecycle events. Register handler/listener dependencies through normal DI factories or autowiring.
 
-Production reads the resulting complete artifact through the same `CqrsMapProviderInterface`, without scanning application classes. `componenta/cqrs-app` itself never supplies a production reflection fallback. When paired with CQRS v4, the standard metadata provider is strictly map-backed in every environment, so metadata missing from the effective/compiled map remains absent at runtime. Applications that intentionally choose `ReflectionCommandMetadataProvider` are opting into a different core metadata contract explicitly.
+Explicit registrations use the core `cqrs.command_handlers`, `cqrs.query_handlers`, and `cqrs.command_listeners` lists. Identical explicit/discovered registrations collapse. Conflicting handlers fail. Identical attribute listener declarations collapse; duplicate explicit listener declarations fail. Listener order is priority descending, then service ID and canonical event list.
 
-An old CQRS key, unsupported map version, or missing non-development map fails with an instruction to clear caches and rebuild. After upgrading from v1, remove the config, discovery, old CQRS, and legacy container caches before running `app:build`.
+## Runtime and building
 
-## Optional Runtime Packages
+The provider registers three factories:
 
-Install separate packages for runtime concerns:
-
-| Package | Adds |
+| Service | Purpose |
 |---|---|
-| `componenta/cqrs-policy` | Command/query policy middleware. |
-| `componenta/cqrs-retry` | Retry middleware. |
-| `componenta/cqrs-lock` | Resource lock middleware. |
-| `componenta/cqrs-transaction-cycle` | Cycle Database transaction middleware. |
-| `componenta/cqrs-transport` | Async transport middleware, contracts, serializer, and worker. |
-| `componenta/cqrs-transport-cycle` | Cycle Database transport implementation. |
-| `componenta/cqrs-transport-console` | `cqrs:worker` Symfony Console command. |
+| `cqrs.maps` | Shared arrays used by the core locator factories. |
+| `CqrsDiscoveryIndex` | Lazily extracts all three registration sections in one pass. |
+| `CqrsBuilder` | Registered in `app.builders`; writes a complete artifact from original source. |
+
+Configure the output path through `Componenta\CQRS\App\ConfigKey::MAP_FILE` (`cqrs.map_file`). The default is `var/cache/build/cqrs.php`, resolved through the existing `PathResolverInterface`.
+
+```bash
+php bin/console.php app:build
+```
+
+The ordinary console command uses the existing container in its current environment. Listing commands or displaying help does not construct builders or start discovery for the build. Creating a builder only stores dependencies.
+
+`CqrsBuilder::build()` reads the original discovery index and explicit registrations, creates directories, writes a complete temporary file beside the destination and publishes it with `rename()`. It does not read the currently loaded runtime map. A source failure leaves the previous artifact intact; a failed publication cleans up its temporary file. Atomicity applies to this artifact, not to all application builders together.
+
+The PHP file returns exactly these sections:
+
+```php
+return [
+    'command_handlers' => [],
+    'query_handlers' => [],
+    'command_listeners' => [],
+];
+```
+
+On the first locator resolution, the shared `cqrs.maps` factory validates explicit configuration and loads the file. A missing, unreadable or malformed file falls back to the original discovery index. Configuration and source errors propagate. Runtime does not create directories, write files or invoke a builder.
+
+These rules apply in every environment. A current artifact avoids discovery while preserving the same handler selection, listener ordering and errors as source registrations. Rebuild or remove the file when source/configuration changes, deploy it with the matching code, and restart long-running processes. The runtime does not scan files to detect a structurally valid but outdated artifact.
+
+## Metadata
+
+Command metadata is supplied by the core `ReflectionCommandMetadataProvider`. It creates fresh attribute instances on demand and works for commands absent from handler maps. The builder stores only handler/listener registrations. Retry, lock and transport metadata remain runtime concerns.
+
+## Migration
+
+Replace versioned `cqrs.map`/compiled configuration with explicit registration lists and `cqrs.map_file`. Replace `CqrsMap` and its providers with plain arrays or the shared `cqrs.maps` service. Remove metadata attribute registration and calls to `isKnown()`. Update custom factories to the array locator constructors described in the core README.
+
+Remove the previous CQRS artifact during deployment and run `app:build` for the matching code/configuration. Existing App and DI cache formats have their own lifecycle.
+
+## Integration tests
+
+The cross-package suite uses the working copies of App, Config, DI, CQRS and its extensions from sibling directories. It verifies Composer loading from those directories, the ordinary application build command, and transport, policy, retry, locking and transactions with source and built maps. SQLite runs in memory.
+
+With the companion repositories checked out beside this package, run:
+
+```bash
+composer --working-dir=integration install
+composer test:integration
+```
+
+PHP requires `pdo_sqlite` and `mbstring`. The integration workflow checks out companion `main` branches and runs the suite on PHP 8.4 and 8.5.

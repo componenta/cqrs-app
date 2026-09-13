@@ -4,72 +4,18 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Discovery\Factory;
 
-use Attribute;
-use Componenta\Config\Config;
+use Componenta\App\ConfigKey;
+use Componenta\ClassFinder\ClassIterator;
+use Componenta\ClassFinder\ClassIteratorInterface;
+use Componenta\Config\ContainerValue;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
-use Componenta\CQRS\ConfigKey;
-use InvalidArgumentException;
-use Psr\Container\ContainerInterface;
-use ReflectionClass;
 
 final class CqrsDiscoveryIndexFactory
 {
-    public function __invoke(ContainerInterface $container): CqrsDiscoveryIndex
+    public function __invoke(ContainerValue $container): CqrsDiscoveryIndex
     {
-        $config = $container->get(ConfigKey::CONFIG);
-
-        if (!$config instanceof Config) {
-            throw new InvalidArgumentException(sprintf(
-                'Container entry "%s" must be a %s instance.',
-                ConfigKey::CONFIG,
-                Config::class,
-            ));
-        }
-
-        $attributes = $config->get(ConfigKey::COMMAND_METADATA_ATTRIBUTES, []);
-
-        if (!is_array($attributes) || !array_is_list($attributes)) {
-            throw new InvalidArgumentException(
-                'CQRS command metadata attributes must be configured as a list of class names.',
-            );
-        }
-
-        $normalized = [];
-        $seen = [];
-
-        foreach ($attributes as $attribute) {
-            if (!is_string($attribute) || !class_exists($attribute)) {
-                throw new InvalidArgumentException(sprintf(
-                    'CQRS command metadata attribute "%s" does not exist.',
-                    is_scalar($attribute) ? (string) $attribute : get_debug_type($attribute),
-                ));
-            }
-
-            if (isset($seen[$attribute])) {
-                continue;
-            }
-
-            $reflection = new ReflectionClass($attribute);
-            $declarations = $reflection->getAttributes(Attribute::class);
-
-            if ($declarations === []) {
-                throw new InvalidArgumentException(sprintf(
-                    'CQRS command metadata class "%s" is not declared with #[Attribute].',
-                    $attribute,
-                ));
-            }
-
-            if (($declarations[0]->newInstance()->flags & Attribute::TARGET_CLASS) === 0) {
-                throw new InvalidArgumentException(sprintf(
-                    'CQRS command metadata attribute "%s" must allow class targets.',
-                    $attribute,
-                ));
-            }
-
-            $seen[$attribute] = true;
-            $normalized[] = $attribute;
-        }
-
-        return new CqrsDiscoveryIndex($normalized);
+        return new CqrsDiscoveryIndex($container->has(ConfigKey::DISCOVERY_SOURCE)
+            ? $container->get(ConfigKey::DISCOVERY_SOURCE, ClassIteratorInterface::class)
+            : new ClassIterator([]));
     }
 }

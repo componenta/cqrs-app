@@ -17,21 +17,13 @@ jobs:
       matrix:
         include:
           - php: '8.4'
-            app: '2.0.0'
-            cqrs: '2.0.1'
-            di: '3.0.0'
+            app: '4.0.0'
+            cqrs: '4.0.0'
+            di: '5.0.0'
           - php: '8.5'
-            app: '2.0.0'
-            cqrs: '2.0.1'
-            di: '3.0.0'
-          - php: '8.4'
-            app: '3.0.2'
-            cqrs: '3.0.3'
-            di: '4.0.2'
-          - php: '8.5'
-            app: '3.0.2'
-            cqrs: '3.0.3'
-            di: '4.0.2'
+            app: '4.0.0'
+            cqrs: '4.0.0'
+            di: '5.0.0'
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
@@ -81,9 +73,9 @@ jobs:
         run: |
           composer config --json repositories.componenta-cqrs '{"type":"path","url":".ci/cqrs","options":{"versions":{"componenta/cqrs":"4.0.0"}}}'
           composer require --no-update \
-            componenta/app:3.0.2 \
+            componenta/app:4.0.0 \
             componenta/cqrs:4.0.0 \
-            componenta/di:4.0.2
+            componenta/di:5.0.0
       - run: composer update --with-all-dependencies --no-interaction --prefer-dist --no-progress
       - run: composer test
       - run: composer analyse

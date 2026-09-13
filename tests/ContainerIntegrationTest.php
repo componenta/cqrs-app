@@ -2,156 +2,109 @@
 
 declare(strict_types=1);
 
-use Componenta\Config\ConfigLoader;
+use Componenta\Config\ConfigFactory;
 use Componenta\Config\ConfigProvider as BaseConfigProvider;
+use Componenta\Config\ContainerValue;
 use Componenta\Config\Environment;
 use Componenta\CQRS\App\ConfigProvider as CqrsAppConfigProvider;
-use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
-use Componenta\CQRS\Command\Locator\CommandHandlerLocator;
 use Componenta\CQRS\Command\Locator\CommandHandlerLocatorInterface;
-use Componenta\CQRS\Command\Locator\CommandListenersLocator;
-use Componenta\CQRS\Command\Locator\CommandListenersLocatorInterface;
 use Componenta\CQRS\Command\Metadata\CommandMetadataProviderInterface;
-use Componenta\CQRS\ConfigKey;
 use Componenta\CQRS\ConfigProvider as CqrsConfigProvider;
-use Componenta\CQRS\Map\CompositeCqrsMapProvider;
-use Componenta\CQRS\Map\CqrsMap;
-use Componenta\CQRS\Map\CqrsMapProviderInterface;
-use Componenta\CQRS\Query\Locator\QueryHandlerLocator;
-use Componenta\CQRS\Query\Locator\QueryHandlerLocatorInterface;
-use Componenta\DI\Container;
-use Componenta\DI\ContainerBuilder;
-use Componenta\Tokenizer\ClassInfo;
+use Componenta\DI\ContainerFactory;
 
 final readonly class CqrsAppIntegrationLocator implements CommandHandlerLocatorInterface
 {
     public function locateFor(object $command): callable
     {
-        return static fn(object $resolved): object => $resolved;
+        return static fn (object $resolved): string => 'custom:' . $resolved->value;
     }
 }
 
 final readonly class CqrsAppIntegrationLocatorDecorator implements CommandHandlerLocatorInterface
 {
-    public function __construct(public CommandHandlerLocatorInterface $inner) {}
+    public function __construct(private CommandHandlerLocatorInterface $inner)
+    {
+    }
 
     public function locateFor(object $command): callable
     {
-        return $this->inner->locateFor($command);
+        $handler = $this->inner->locateFor($command);
+        return static fn (object $resolved): string => 'decorated:' . $handler($resolved);
     }
 }
 
 #[Attribute(Attribute::TARGET_CLASS)]
-final readonly class CqrsAppIntegrationMetadata
+final class CqrsAppIntegrationMetadata
 {
-    public function __construct(public string $value) {}
+    public function __construct(public string $value)
+    {
+    }
 }
 
-#[CqrsAppIntegrationMetadata('discovered')]
-final readonly class CqrsAppIntegrationMetadataCommand {}
-
-/**
- * @param list<callable(): array> $providers
- */
-function buildCqrsAppIntegrationContainer(array $providers): Container
+#[CqrsAppIntegrationMetadata('original')]
+final readonly class CqrsAppIntegrationMetadataCommand
 {
-    $config = ConfigLoader::load(
-        new Environment(['APP_ENV' => 'development']),
+}
+
+/** @param list<callable(): array> $providers */
+function buildCqrsAppIntegrationContainer(array $providers): ContainerValue
+{
+    $composition = (new ConfigFactory())->create(
+        new Environment(['APP_ENV' => 'production']),
         ...$providers,
     );
 
-    return ContainerBuilder::configure($config)->build();
+    return (new ContainerFactory())->create($composition->config, $composition->dependencies);
 }
 
-it('builds one effective map provider shared by every core locator', function (): void {
+it('reads fresh metadata for an unregistered command without resolving maps or discovery', function (): void {
     $container = buildCqrsAppIntegrationContainer([
         new CqrsConfigProvider(),
         new CqrsAppConfigProvider(),
-    ]);
-    $container->get(CqrsDiscoveryIndex::class)->finalize();
-
-    expect($container->get(CommandHandlerLocatorInterface::class))
-        ->toBeInstanceOf(CommandHandlerLocator::class)
-        ->and($container->get(QueryHandlerLocatorInterface::class))
-        ->toBeInstanceOf(QueryHandlerLocator::class)
-        ->and($container->get(CommandListenersLocatorInterface::class))
-        ->toBeInstanceOf(CommandListenersLocator::class)
-        ->and($container->get(CqrsMapProviderInterface::class))
-        ->toBeInstanceOf(CompositeCqrsMapProvider::class)
-        ->and($container->get(CqrsMapProviderInterface::class))
-        ->toBe($container->get(CqrsMapProviderInterface::class));
-});
-
-it('exposes discovered metadata through the same provider used by core runtime services', function (): void {
-    $mapProvider = new class extends BaseConfigProvider {
-        protected function getConfig(): array
-        {
-            return [
-                ConfigKey::COMMAND_METADATA_ATTRIBUTES => [CqrsAppIntegrationMetadata::class],
-                ConfigKey::CQRS_MAP => [
-                    'version' => CqrsMap::VERSION,
-                    'commands' => [
-                        'handlers' => [
-                            CqrsAppIntegrationMetadataCommand::class => [
-                                'service' => 'metadata.command.handler',
-                                'method' => '__invoke',
-                            ],
-                        ],
-                    ],
+        static fn (): array => [
+            \Componenta\Config\ConfigKey::DEPENDENCIES => [
+                \Componenta\Config\ConfigKey::FACTORIES => [
+                    \Componenta\CQRS\ConfigKey::MAPS => static fn () => throw new RuntimeException('maps are not available'),
+                    \Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex::class
+                        => static fn () => throw new RuntimeException('discovery is not available'),
                 ],
-            ];
-        }
-    };
-    $container = buildCqrsAppIntegrationContainer([
-        new CqrsConfigProvider(),
-        new CqrsAppConfigProvider(),
-        $mapProvider,
+            ],
+        ],
     ]);
-    $index = $container->get(CqrsDiscoveryIndex::class);
-    $index->handle(new ClassInfo(CqrsAppIntegrationMetadataCommand::class));
-    $index->finalize();
+    $metadata = $container->get(CommandMetadataProviderInterface::class);
+    $first = $metadata->get(CqrsAppIntegrationMetadataCommand::class, CqrsAppIntegrationMetadata::class);
+    $first->value = 'changed';
+    $second = $metadata->get(new CqrsAppIntegrationMetadataCommand(), CqrsAppIntegrationMetadata::class);
 
-    $metadata = $container
-        ->get(CommandMetadataProviderInterface::class)
-        ->get(CqrsAppIntegrationMetadataCommand::class, CqrsAppIntegrationMetadata::class);
-
-    expect($metadata)->toBeInstanceOf(CqrsAppIntegrationMetadata::class)
-        ->and($metadata->value)->toBe('discovered')
-        ->and($container->get(CqrsMapProviderInterface::class)->map()
-            ->commandMetadata(
-                CqrsAppIntegrationMetadataCommand::class,
-                CqrsAppIntegrationMetadata::class,
-            ))->not->toBeNull();
+    expect($second->value)->toBe('original')->and($second)->not->toBe($first);
 });
 
 it('lets a later provider select a custom locator implementation', function (): void {
-    $customProvider = new class extends BaseConfigProvider {
+    $provider = new class () extends BaseConfigProvider {
         protected function getFactories(): array
         {
             return [
-                CommandHandlerLocatorInterface::class
-                    => static fn(): CommandHandlerLocatorInterface => new CqrsAppIntegrationLocator(),
+                CommandHandlerLocatorInterface::class => static fn () => new CqrsAppIntegrationLocator(),
             ];
         }
     };
-
     $container = buildCqrsAppIntegrationContainer([
         new CqrsConfigProvider(),
         new CqrsAppConfigProvider(),
-        $customProvider,
+        $provider,
     ]);
+    $command = (object) ['value' => 'input'];
 
-    expect($container->get(CommandHandlerLocatorInterface::class))
-        ->toBeInstanceOf(CqrsAppIntegrationLocator::class);
+    expect($container->get(CommandHandlerLocatorInterface::class)->locateFor($command)($command))
+        ->toBe('custom:input');
 });
 
-it('applies delegators to the locator implementation selected by the last provider', function (): void {
-    $customProvider = new class extends BaseConfigProvider {
+it('applies delegators to the locator selected by the last provider', function (): void {
+    $provider = new class () extends BaseConfigProvider {
         protected function getFactories(): array
         {
             return [
-                CommandHandlerLocatorInterface::class
-                    => static fn(): CommandHandlerLocatorInterface => new CqrsAppIntegrationLocator(),
+                CommandHandlerLocatorInterface::class => static fn () => new CqrsAppIntegrationLocator(),
             ];
         }
 
@@ -159,21 +112,18 @@ it('applies delegators to the locator implementation selected by the last provid
         {
             return [
                 CommandHandlerLocatorInterface::class => [
-                    static fn(CommandHandlerLocatorInterface $inner): CommandHandlerLocatorInterface
-                        => new CqrsAppIntegrationLocatorDecorator($inner),
+                    static fn (CommandHandlerLocatorInterface $inner) => new CqrsAppIntegrationLocatorDecorator($inner),
                 ],
             ];
         }
     };
-
     $container = buildCqrsAppIntegrationContainer([
         new CqrsConfigProvider(),
         new CqrsAppConfigProvider(),
-        $customProvider,
+        $provider,
     ]);
+    $command = (object) ['value' => 'input'];
 
-    $locator = $container->get(CommandHandlerLocatorInterface::class);
-
-    expect($locator)->toBeInstanceOf(CqrsAppIntegrationLocatorDecorator::class)
-        ->and($locator->inner)->toBeInstanceOf(CqrsAppIntegrationLocator::class);
+    expect($container->get(CommandHandlerLocatorInterface::class)->locateFor($command)($command))
+        ->toBe('decorated:custom:input');
 });

@@ -4,23 +4,13 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Discovery;
 
-use Attribute;
-use Componenta\ClassFinder\Attribute\DevOnly;
-use Componenta\ClassFinder\Exception\ListenerAlreadyFinalizedException;
-use Componenta\ClassFinder\FinalizableListenerInterface;
-use Componenta\ClassFinder\FinalizationStateInterface;
+use Componenta\ClassFinder\ClassIteratorInterface;
 use Componenta\CQRS\App\Exception\InvalidDiscoveryDeclarationException;
 use Componenta\CQRS\Command\Attribute\AsCommandHandler;
 use Componenta\CQRS\Command\Attribute\AsCommandListener;
 use Componenta\CQRS\Command\Event\CommandListenerInterface;
-use Componenta\CQRS\Map\CommandListenerDescriptor;
-use Componenta\CQRS\Map\CommandMetadataDescriptor;
-use Componenta\CQRS\Map\CqrsMap;
-use Componenta\CQRS\Map\HandlerDescriptor;
+use Componenta\CQRS\Internal\RegistrationNormalizer;
 use Componenta\CQRS\Query\Attribute\AsQueryHandler;
-use Componenta\DI\Compile\Autowire\AutowireEntry;
-use Componenta\DI\Compile\Autowire\AutowireEntryContributorInterface;
-use Componenta\Tokenizer\ClassInfo;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionIntersectionType;
@@ -29,107 +19,74 @@ use ReflectionNamedType;
 use ReflectionParameter;
 use ReflectionType;
 use ReflectionUnionType;
+use Throwable;
 
-#[DevOnly]
-final class CqrsDiscoveryIndex implements FinalizableListenerInterface, FinalizationStateInterface, AutowireEntryContributorInterface
+/**
+ * @phpstan-import-type Handler from RegistrationNormalizer
+ * @phpstan-import-type Listener from RegistrationNormalizer
+ */
+final class CqrsDiscoveryIndex
 {
-    /** @var array<string, HandlerDescriptor> */
+    /** @var array<array-key, Handler> */
     private array $commandHandlers = [];
-
-    /** @var array<string, HandlerDescriptor> */
+    /** @var array<array-key, Handler> */
     private array $queryHandlers = [];
-
-    /** @var array<string, list<CommandListenerDescriptor>> */
+    /** @var array<array-key, list<Listener>> */
     private array $commandListeners = [];
+    private bool $loaded = false;
+    private ?Throwable $failure = null;
 
-    /** @var array<string, array<class-string, CommandMetadataDescriptor>> */
-    private array $commandMetadata = [];
-
-    /** @var array<string, true> */
-    private array $knownCommands = [];
-
-    private ?CqrsMap $map = null;
-
-    private bool $metadataAttributesValidated = false;
-
-    public bool $finalized {
-        get => $this->map !== null;
-    }
-
-    /**
-     * @param list<class-string> $metadataAttributes
-     */
-    public function __construct(private readonly array $metadataAttributes = [])
+    public function __construct(private readonly ClassIteratorInterface $classes)
     {
     }
 
-    public function handle(ClassInfo $info): void
+    /** @return array<array-key, Handler> */
+    public function commandHandlers(): array
     {
-        if ($this->finalized) {
-            throw ListenerAlreadyFinalizedException::forListener($this);
+        $this->load();
+        return $this->commandHandlers;
+    }
+
+    /** @return array<array-key, Handler> */
+    public function queryHandlers(): array
+    {
+        $this->load();
+        return $this->queryHandlers;
+    }
+
+    /** @return array<array-key, list<Listener>> */
+    public function commandListeners(): array
+    {
+        $this->load();
+        return $this->commandListeners;
+    }
+
+    private function load(): void
+    {
+        if ($this->failure !== null) {
+            throw $this->failure;
         }
-
-        $this->validateMetadataAttributes();
-        $reflector = $info->reflector;
-
-        $this->discoverHandlers(
-            $reflector,
-            AsCommandHandler::class,
-            'command',
-        );
-        $this->discoverHandlers(
-            $reflector,
-            AsQueryHandler::class,
-            'query',
-        );
-        $this->discoverListeners($reflector);
-        $this->discoverMetadata($reflector);
-    }
-
-    public function finalize(): void
-    {
-        if ($this->finalized) {
-            throw ListenerAlreadyFinalizedException::forListener($this);
+        if ($this->loaded) {
+            return;
         }
-
-        $map = new CqrsMap(
-            commandHandlers: $this->commandHandlers,
-            queryHandlers: $this->queryHandlers,
-            commandListeners: $this->commandListeners,
-            commandMetadata: $this->commandMetadata,
-            knownCommands: $this->knownCommands,
-        );
-
-        $this->map = $map;
-    }
-
-    public function entries(): iterable
-    {
-        $services = [];
-
-        foreach ([...array_values($this->commandHandlers), ...array_values($this->queryHandlers)] as $handler) {
-            $services[$handler->service] = true;
-        }
-
-        foreach ($this->commandListeners as $listeners) {
-            foreach ($listeners as $listener) {
-                $services[$listener->service] = true;
+        try {
+            foreach ($this->classes as $info) {
+                $reflector = $info->reflector;
+                $this->discoverHandlers($reflector, AsCommandHandler::class, 'command');
+                $this->discoverHandlers($reflector, AsQueryHandler::class, 'query');
+                $this->discoverListeners($reflector);
             }
+            $this->commandHandlers = RegistrationNormalizer::handlers($this->commandHandlers, 'command_handlers');
+            $this->queryHandlers = RegistrationNormalizer::handlers($this->queryHandlers, 'query_handlers');
+            $this->commandListeners = RegistrationNormalizer::listeners($this->commandListeners);
+            $this->loaded = true;
+        } catch (Throwable $exception) {
+            $this->commandHandlers = [];
+            $this->queryHandlers = [];
+            $this->commandListeners = [];
+            $this->failure = $exception;
+            throw $exception;
         }
-
-        ksort($services);
-        foreach (array_keys($services) as $service) {
-            if (class_exists($service)) {
-                yield new AutowireEntry($service, 'CQRS discovery');
-            }
-        }
-    }
-
-    public function map(): CqrsMap
-    {
-        return $this->map ?? throw new InvalidDiscoveryDeclarationException(
-            'CQRS discovery is not finalized. Complete application discovery before dispatch or compilation.',
-        );
     }
 
     /**
@@ -199,7 +156,7 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
             $this->registerHandler(
                 $kind,
                 $this->messageName($classAttributes[0], $method, $kind),
-                new HandlerDescriptor($reflector->getName(), $method->getName()),
+                ['service' => $reflector->getName(), 'method' => $method->getName()],
                 $method,
             );
 
@@ -221,7 +178,7 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
             $this->registerHandler(
                 $kind,
                 $this->messageName($attributes[0], $method, $kind),
-                new HandlerDescriptor($reflector->getName(), $method->getName()),
+                ['service' => $reflector->getName(), 'method' => $method->getName()],
                 $method,
             );
         }
@@ -318,7 +275,7 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
 
         if (!$method->isPublic()
             || $method->isStatic()
-            || ($name !== '__invoke' && str_starts_with($name, '__'))
+            || (strcasecmp($name, '__invoke') !== 0 && str_starts_with($name, '__'))
         ) {
             throw new InvalidDiscoveryDeclarationException(sprintf(
                 'CQRS %s handler method "%s::%s" must be a public non-static operation method.',
@@ -397,20 +354,20 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         if ($type instanceof ReflectionUnionType) {
             return array_any(
                 $type->getTypes(),
-                fn(ReflectionType $member): bool => $this->typeCanAcceptObject($member),
+                fn (ReflectionType $member): bool => $this->typeCanAcceptObject($member),
             );
         }
 
         if ($type instanceof ReflectionIntersectionType) {
             return array_all(
                 $type->getTypes(),
-                fn(ReflectionType $member): bool => $this->typeCanAcceptObject($member),
+                fn (ReflectionType $member): bool => $this->typeCanAcceptObject($member),
             );
         }
 
         return $type instanceof ReflectionNamedType
             && (!$type->isBuiltin()
-                || in_array($type->getName(), ['mixed', 'object'], true));
+                || in_array($type->getName(), ['mixed', 'object', 'iterable', 'callable'], true));
     }
 
     /** @param class-string $message */
@@ -430,14 +387,14 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         if ($type instanceof ReflectionUnionType) {
             return array_any(
                 $type->getTypes(),
-                fn(ReflectionType $member): bool => $this->typeAccepts($member, $message, $scope),
+                fn (ReflectionType $member): bool => $this->typeAccepts($member, $message, $scope),
             );
         }
 
         if ($type instanceof ReflectionIntersectionType) {
             return array_all(
                 $type->getTypes(),
-                fn(ReflectionType $member): bool => $this->typeAccepts($member, $message, $scope),
+                fn (ReflectionType $member): bool => $this->typeAccepts($member, $message, $scope),
             );
         }
 
@@ -446,7 +403,12 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         }
 
         if ($type->isBuiltin()) {
-            return in_array($type->getName(), ['mixed', 'object'], true);
+            return match ($type->getName()) {
+                'mixed', 'object' => true,
+                'iterable' => is_a($message, \Traversable::class, true),
+                'callable' => new ReflectionClass($message)->hasMethod('__invoke'),
+                default => false,
+            };
         }
 
         $accepted = match ($type->getName()) {
@@ -468,11 +430,12 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
 
     /**
      * @param 'command'|'query' $kind
+     * @param Handler $descriptor
      */
     private function registerHandler(
         string $kind,
         string $message,
-        HandlerDescriptor $descriptor,
+        array $descriptor,
         ReflectionMethod $method,
     ): void {
         $handlers = $kind === 'command'
@@ -480,21 +443,20 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
             : $this->queryHandlers;
         $existing = $handlers[$message] ?? null;
 
-        if ($existing !== null && !$existing->equals($descriptor)) {
+        if ($existing !== null && $existing !== $descriptor) {
             throw new InvalidDiscoveryDeclarationException(sprintf(
                 'Multiple CQRS %s handlers are registered for "%s": "%s::%s" and "%s::%s".',
                 $kind,
                 $message,
-                $existing->service,
-                $existing->method,
-                $descriptor->service,
+                $existing['service'],
+                $existing['method'],
+                $descriptor['service'],
                 $method->getName(),
             ));
         }
 
         if ($kind === 'command') {
             $this->commandHandlers[$message] = $descriptor;
-            $this->knownCommands[$message] = true;
 
             return;
         }
@@ -526,15 +488,17 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
         foreach ($attributes as $attribute) {
             /** @var AsCommandListener $listener */
             $listener = $attribute->newInstance();
-            $descriptor = new CommandListenerDescriptor(
-                $reflector->getName(),
-                $listener->eventTypes,
-                $listener->priority,
-            );
+            $descriptor = RegistrationNormalizer::listeners([
+                $listener->command => [[
+                    'service' => $reflector->getName(),
+                    'events' => $listener->eventTypes,
+                    'priority' => $listener->priority,
+                ]],
+            ])[$listener->command][0];
             $duplicate = false;
 
             foreach ($this->commandListeners[$listener->command] ?? [] as $existing) {
-                if ($existing->equals($descriptor)) {
+                if ($existing === $descriptor) {
                     $duplicate = true;
                     break;
                 }
@@ -543,73 +507,7 @@ final class CqrsDiscoveryIndex implements FinalizableListenerInterface, Finaliza
             if (!$duplicate) {
                 $this->commandListeners[$listener->command][] = $descriptor;
             }
-
-            $this->knownCommands[$listener->command] = true;
         }
     }
 
-    private function validateMetadataAttributes(): void
-    {
-        if ($this->metadataAttributesValidated) {
-            return;
-        }
-
-        foreach ($this->metadataAttributes as $attributeClass) {
-            if (!class_exists($attributeClass)) {
-                throw new InvalidDiscoveryDeclarationException(sprintf(
-                    'Command metadata attribute class "%s" does not exist.',
-                    $attributeClass,
-                ));
-            }
-
-            $attributeDeclaration = new ReflectionClass($attributeClass);
-            $attributeMetadata = $attributeDeclaration->getAttributes(Attribute::class);
-
-            if ($attributeMetadata === []) {
-                throw new InvalidDiscoveryDeclarationException(sprintf(
-                    'Command metadata class "%s" is not declared with #[Attribute].',
-                    $attributeClass,
-                ));
-            }
-
-            if (($attributeMetadata[0]->newInstance()->flags & Attribute::TARGET_CLASS) === 0) {
-                throw new InvalidDiscoveryDeclarationException(sprintf(
-                    'Command metadata attribute "%s" must allow class targets.',
-                    $attributeClass,
-                ));
-            }
-        }
-
-        $this->metadataAttributesValidated = true;
-    }
-
-    /**
-     * @param ReflectionClass<object> $reflector
-     */
-    private function discoverMetadata(ReflectionClass $reflector): void
-    {
-        foreach ($this->metadataAttributes as $attributeClass) {
-            $attributes = $reflector->getAttributes($attributeClass);
-
-            if ($attributes === []) {
-                continue;
-            }
-
-            if (count($attributes) > 1) {
-                throw new InvalidDiscoveryDeclarationException(sprintf(
-                    'Command "%s" has repeated metadata attribute "%s"; only one descriptor per attribute is supported.',
-                    $reflector->getName(),
-                    $attributeClass,
-                ));
-            }
-
-            $command = $reflector->getName();
-            $this->commandMetadata[$command][$attributeClass]
-                = new CommandMetadataDescriptor(
-                    $attributeClass,
-                    $attributes[0]->getArguments(),
-                );
-            $this->knownCommands[$command] = true;
-        }
-    }
 }
