@@ -47,6 +47,7 @@ function runtimeMapsContainer(string $root, ClassIterator $classes, array $confi
                 DependencyKey::SERVICES => [
                     PathResolverInterface::class => new PathResolver($root),
                     'app.discovery.source' => $classes,
+                    \Componenta\ClassFinder\ClassIteratorInterface::class => $classes,
                 ],
             ],
         ],

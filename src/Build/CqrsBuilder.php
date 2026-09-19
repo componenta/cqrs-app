@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace Componenta\CQRS\App\Build;
 
 use Componenta\App\Build\ApplicationBuilderInterface;
+use Componenta\App\Build\PhpMapFile;
+use Componenta\App\Build\ApplicationBuildCleanerInterface;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
 use Componenta\CQRS\Internal\RegistrationNormalizer;
 use Componenta\VarExport\VarExport;
 use ErrorException;
 use RuntimeException;
 
-final readonly class CqrsBuilder implements ApplicationBuilderInterface
+final readonly class CqrsBuilder implements ApplicationBuilderInterface, ApplicationBuildCleanerInterface
 {
     /**
      * @param list<array<string, mixed>> $commandHandlers
@@ -25,6 +27,11 @@ final readonly class CqrsBuilder implements ApplicationBuilderInterface
         private array $queryHandlers = [],
         private array $commandListeners = [],
     ) {
+    }
+
+    public function clean(): void
+    {
+        PhpMapFile::remove($this->file);
     }
 
     public function build(): void

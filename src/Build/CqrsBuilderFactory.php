@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Build;
 
+use Componenta\App\ConfigKey as AppConfigKey;
+use Componenta\ClassFinder\ClassIterator;
+use Componenta\ClassFinder\ClassIteratorInterface;
 use Componenta\Config\ContainerValue;
 use Componenta\CQRS\App\ConfigKey;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
@@ -29,7 +32,9 @@ final class CqrsBuilderFactory
         /** @var list<array<string, mixed>> $queries */
         /** @var list<array<string, mixed>> $listeners */
         return new CqrsBuilder(
-            $container->get(CqrsDiscoveryIndex::class, CqrsDiscoveryIndex::class),
+            new CqrsDiscoveryIndex($container->has(AppConfigKey::DISCOVERY_SOURCE)
+                ? $container->get(AppConfigKey::DISCOVERY_SOURCE, ClassIteratorInterface::class)
+                : new ClassIterator([])),
             $container->get(PathResolverInterface::class, PathResolverInterface::class)->resolve($path),
             $commands,
             $queries,

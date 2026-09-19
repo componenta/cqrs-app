@@ -10,6 +10,7 @@ use RuntimeException;
 use PHPUnit\Framework\Assert;
 use Componenta\App\Build\ApplicationBuildOrchestrator;
 use Componenta\ClassFinder\ClassIterator;
+use Componenta\ClassFinder\ClassIteratorInterface;
 use Componenta\Config\ConfigFactory;
 use Componenta\Config\ConfigKey as DIKey;
 use Componenta\Config\Environment;
@@ -195,6 +196,7 @@ it('preserves transport, policy, retry, locking and transaction semantics with s
                     DIKey::DEPENDENCIES => [DIKey::DELEGATORS => [OperationContextSerializerInterface::class => [static fn (OperationContextSerializerInterface $inner) => new JsonOperationContextSerializer(['trace'])]], DIKey::SERVICES => [
                         PathResolverInterface::class => new PathResolver($root),
                         \Componenta\App\ConfigKey::DISCOVERY_SOURCE => $classes,
+                        ClassIteratorInterface::class => $classes,
                         DatabaseInterface::class => $database,
                         LockFactory::class => $locks,
                         IntegrationState::class => $state,

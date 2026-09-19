@@ -10,6 +10,7 @@ use Componenta\App\Scope;
 use Componenta\App\Console\IOFactory;
 use Componenta\App\Console\InputFactoryInterface;
 use Componenta\App\Console\OutputFactoryInterface;
+use Componenta\ClassFinder\ClassIteratorInterface;
 use Componenta\Config\Environment;
 use Componenta\Config\ConfigKey as DIKey;
 use Componenta\CQRS\App\Build\CqrsBuilder;
@@ -88,7 +89,7 @@ PHP);
         $result = ConfigFactory::create(new PathResolver($root), $definition, new Environment(['APP_ENV' => $environment]));
         $container = (new ContainerFactory())->create($result->config, $result->dependencies);
         if ($discovery) {
-            Assert::assertSame($result->discovered, $container->get('app.discovery.source'));
+            Assert::assertSame($result->discovered, $container->get(ClassIteratorInterface::class));
         }
         return $container;
     };
@@ -114,11 +115,13 @@ PHP);
         }
     } finally {
         spl_autoload_unregister($autoload);
-        if (is_file($root.'/cqrs.php')) {
-            unlink($root.'/cqrs.php');
+        $entries = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($entries as $entry) {
+            $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
         }
-        unlink($fixture);
-        rmdir($root.'/src');
         rmdir($root);
     }
 });
