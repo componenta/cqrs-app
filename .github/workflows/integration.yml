@@ -25,9 +25,11 @@ jobs:
           tools: composer:v2
       - name: Check out companion packages
         run: |
-          for package in $(php -r '$manifest = json_decode(file_get_contents("cqrs-app/integration/composer.json"), true, flags: JSON_THROW_ON_ERROR); foreach (array_keys($manifest["require"]) as $package) { if (str_starts_with($package, "componenta/") && $package !== "componenta/cqrs-app") { echo substr($package, strlen("componenta/")), PHP_EOL; } }'); do
-            git clone --depth 1 --branch main "https://github.com/componenta/$package.git" "$package"
-          done
+          set -euo pipefail
+          php -r '$manifest = json_decode(file_get_contents("cqrs-app/integration/composer.json"), true, flags: JSON_THROW_ON_ERROR); $versions = $manifest["repositories"][0]["options"]["versions"]; foreach (array_keys($manifest["require"]) as $package) { if (str_starts_with($package, "componenta/") && $package !== "componenta/cqrs-app") { echo substr($package, strlen("componenta/")), " v", $versions[$package], PHP_EOL; } }' > "$RUNNER_TEMP/companion-versions"
+          while read -r package tag; do
+            git clone --depth 1 --branch "$tag" "https://github.com/componenta/$package.git" "$package"
+          done < "$RUNNER_TEMP/companion-versions"
       - name: Install integration dependencies
         run: composer --working-dir=cqrs-app/integration install --no-interaction --prefer-dist --no-scripts
       - name: Test package integration
