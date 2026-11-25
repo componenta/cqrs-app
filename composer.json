@@ -5,7 +5,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.4",
-        "componenta/app": "^5.0.0",
+        "componenta/app": "^5.0.0 || ^6.0.0",
         "componenta/class-finder": "^2.1.0",
         "componenta/config": "^3.0.0",
         "componenta/cqrs": "^4.0.0",
@@ -16,7 +16,7 @@
         "psr/container": "^2.0"
     },
     "require-dev": {
-        "componenta/app-console": "^5.0.0",
+        "componenta/app-console": "^5.0.0 || ^6.0.0",
         "pestphp/pest": "^4.0",
         "phpstan/phpstan": "^2.0"
     },
