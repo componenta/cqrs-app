@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Factory;
 
+use Componenta\App\Build\PhpMapFile;
 use Componenta\Config\ContainerValue;
 use Componenta\CQRS\App\ConfigKey;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
 use Componenta\CQRS\Internal\RegistrationNormalizer;
 use Componenta\Stdlib\PathResolverInterface;
-use ErrorException;
 use InvalidArgumentException;
 use Throwable;
 
@@ -25,7 +25,9 @@ final class CqrsMapsFactory
             throw new InvalidArgumentException(ConfigKey::MAP_FILE . ' must be a non-empty path.');
         }
         $file = $container->get(PathResolverInterface::class, PathResolverInterface::class)->resolve($path);
-        $maps = self::read($file);
+        $maps = $container->config->environment->bool('APP_DISCOVERY_SOURCE', false)
+            ? null
+            : self::read($file);
         if ($maps !== null) {
             return $maps;
         }
@@ -40,19 +42,15 @@ final class CqrsMapsFactory
     /** @return Maps|null */
     private static function read(string $file): ?array
     {
-        if (!is_file($file) || !is_readable($file)) {
+        $map = PhpMapFile::read($file);
+        if ($map === null) {
             return null;
         }
-        set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
-            throw new ErrorException($message, 0, $severity, $file, $line);
-        });
+
         try {
-            $maps = (static fn (string $path): mixed => require $path)($file);
-            return RegistrationNormalizer::maps($maps);
+            return RegistrationNormalizer::maps($map);
         } catch (Throwable) {
             return null;
-        } finally {
-            restore_error_handler();
         }
     }
 }

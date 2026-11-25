@@ -32,10 +32,10 @@ final class RuntimeMapHandler
         return 'result:' . $command->value;
     }
 }
-function runtimeMapsContainer(string $root, ClassIterator $classes, array $config = [], string $environment = 'production'): ContainerValue
+function runtimeMapsContainer(string $root, ClassIterator $classes, array $config = [], string $environment = 'production', bool $forceSource = false): ContainerValue
 {
     $composition = (new ConfigFactory())->create(
-        new Environment(['APP_ENV' => $environment]),
+        new Environment(['APP_ENV' => $environment, 'APP_DISCOVERY_SOURCE' => $forceSource]),
         new \Componenta\App\ConfigProvider(),
         new \Componenta\App\Console\ConfigProvider(),
         new \Componenta\CQRS\ConfigProvider(),
@@ -410,3 +410,24 @@ it('rejects an invalid configured map path before discovery or artifact publicat
         ->and($visited)->toBe(0)
         ->and(is_dir($root))->toBeFalse();
 })->with(['', " \t\n", 42, [['cqrs.php']]]);
+
+
+it('bypasses a stale CQRS map during explicit source recovery', function (): void {
+    $root = sys_get_temp_dir() . '/cqrs_recovery_' . bin2hex(random_bytes(8));
+    mkdir($root);
+    $file = $root . '/cqrs.php';
+    $contents = "<?php return ['command_handlers' => [], 'query_handlers' => [], 'command_listeners' => []];";
+    file_put_contents($file, $contents);
+    try {
+        $ordinary = runtimeMapsContainer($root, runtimeMapsClasses());
+        expect($ordinary->get(CommandHandlerLocatorInterface::class)->supports(new RuntimeMapCommand('old')))->toBeFalse();
+
+        $recovery = runtimeMapsContainer($root, runtimeMapsClasses(), forceSource: true);
+        expect($recovery->get(CommandBusInterface::class)->dispatch(new RuntimeMapCommand('recovered'))->result?->value)
+            ->toBe('result:recovered');
+        expect(file_get_contents($file))->toBe($contents);
+    } finally {
+        unlink($file);
+        rmdir($root);
+    }
+});
