@@ -102,3 +102,44 @@ it('cleans temporary files when publishing fails and preserves the destination',
         rmdir($root);
     }
 });
+
+it('preserves the published map when a discovered handler conflicts with explicit registration', function (): void {
+    $root = sys_get_temp_dir() . '/cqrs_build_conflict_' . bin2hex(random_bytes(8));
+    mkdir($root);
+    $file = $root . '/cqrs.php';
+    $builder = new CqrsBuilder(
+        new CqrsDiscoveryIndex(new ClassIterator([
+            BuildCommandHandler::class => new ClassInfo(BuildCommandHandler::class),
+        ])),
+        $file,
+    );
+    try {
+        $builder->build();
+        $original = file_get_contents($file);
+        $conflicting = new CqrsBuilder(
+            new CqrsDiscoveryIndex(new ClassIterator([
+                BuildCommandHandler::class => new ClassInfo(BuildCommandHandler::class),
+            ])),
+            $file,
+            commandHandlers: [
+                ['message' => BuildCommandMessage::class, 'service' => 'other.handler', 'method' => 'handle'],
+            ],
+        );
+        expect(fn () => $conflicting->build())
+            ->toThrow(\Componenta\CQRS\Map\Exception\CqrsMapConflictException::class);
+        expect(file_get_contents($file))->toBe($original)
+            ->and(require $file)->toBe([
+                'command_handlers' => [
+                    BuildCommandMessage::class => ['service' => BuildCommandHandler::class, 'method' => '__invoke'],
+                ],
+                'query_handlers' => [],
+                'command_listeners' => [],
+            ])
+            ->and(glob($root . '/.*.tmp'))->toBe([]);
+    } finally {
+        if (is_file($file)) {
+            unlink($file);
+        }
+        rmdir($root);
+    }
+});
