@@ -389,3 +389,24 @@ it('merges numeric message names and preserves dispatch after building the map',
         rmdir($root);
     }
 })->with([false, true]);
+
+
+it('rejects an invalid configured map path before discovery or artifact publication', function (mixed $path): void {
+    $root = sys_get_temp_dir() . '/cqrs_invalid_path_' . bin2hex(random_bytes(8));
+    $visited = 0;
+    $classes = new ClassIterator((static function () use (&$visited): Generator {
+        ++$visited;
+        yield RuntimeMapHandler::class => new ClassInfo(RuntimeMapHandler::class);
+    })());
+    $container = runtimeMapsContainer($root, $classes, ['cqrs.map_file' => $path]);
+    expect(fn () => $container->get(CommandBusInterface::class))
+        ->toThrow(\Componenta\DI\Exception\ResolutionException::class, 'must be a non-empty path')
+        ->and($visited)->toBe(0)
+        ->and(is_dir($root))->toBeFalse();
+
+    $container = runtimeMapsContainer($root, $classes, ['cqrs.map_file' => $path]);
+    expect(fn () => $container->get(ApplicationBuildOrchestrator::class)->build())
+        ->toThrow(\Componenta\DI\Exception\ResolutionException::class, 'must be a non-empty path')
+        ->and($visited)->toBe(0)
+        ->and(is_dir($root))->toBeFalse();
+})->with(['', " \t\n", 42, ['cqrs.php']]);
