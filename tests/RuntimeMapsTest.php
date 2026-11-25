@@ -409,4 +409,4 @@ it('rejects an invalid configured map path before discovery or artifact publicat
         ->toThrow(\Componenta\DI\Exception\ResolutionException::class, 'must be a non-empty path')
         ->and($visited)->toBe(0)
         ->and(is_dir($root))->toBeFalse();
-})->with(['', " \t\n", 42, ['cqrs.php']]);
+})->with(['', " \t\n", 42, [['cqrs.php']]]);
