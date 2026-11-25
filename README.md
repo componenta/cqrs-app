@@ -76,7 +76,7 @@ The provider registers three factories:
 | Service | Purpose |
 |---|---|
 | `cqrs.maps` | Shared arrays used by the core locator factories. |
-| `CqrsDiscoveryIndex` | Lazily extracts all three registration sections in one pass. |
+| `CqrsDiscoveryIndex` | Lazily extracts all three registration sections in one pass. Concurrent or reentrant calls during an active scan throw `LogicException` without changing that scan's state. |
 | `CqrsBuilder` | Registered in `app.builders`; writes a complete artifact from original source. |
 
 Configure the output path through `Componenta\CQRS\App\ConfigKey::MAP_FILE` (`cqrs.map_file`). The default is `var/cache/build/cqrs.php`, resolved through the existing `PathResolverInterface`.

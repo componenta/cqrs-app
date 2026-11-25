@@ -48,3 +48,85 @@ it('never publishes partial discovery after an interrupted source', function ():
         }
     }
 });
+
+
+final class LazyDiscoverySecondCommand
+{
+}
+
+#[AsCommandHandler]
+final class LazyDiscoverySecondHandler
+{
+    public function __invoke(LazyDiscoverySecondCommand $command): void
+    {
+    }
+}
+
+it('rejects reentrant discovery without corrupting the active scan', function (): void {
+    $index = null;
+    $reentryFailure = null;
+    $classes = new ClassIterator((static function () use (&$index, &$reentryFailure): Generator {
+        yield LazyDiscoveryHandler::class => new ClassInfo(LazyDiscoveryHandler::class);
+
+        try {
+            $index->queryHandlers();
+        } catch (LogicException $caught) {
+            $reentryFailure = $caught;
+        }
+
+        yield LazyDiscoverySecondHandler::class => new ClassInfo(LazyDiscoverySecondHandler::class);
+    })());
+    $index = new CqrsDiscoveryIndex($classes);
+
+    $expected = [
+        LazyDiscoveryCommand::class => ['service' => LazyDiscoveryHandler::class, 'method' => '__invoke'],
+        LazyDiscoverySecondCommand::class => ['service' => LazyDiscoverySecondHandler::class, 'method' => '__invoke'],
+    ];
+    expect($index->commandHandlers())->toBe($expected)
+        ->and($reentryFailure)->toBeInstanceOf(LogicException::class)
+        ->and($index->commandHandlers())->toBe($expected)
+        ->and($index->queryHandlers())->toBe([])
+        ->and($index->commandListeners())->toBe([]);
+});
+
+it('rejects a competing discovery during a suspended fiber without poisoning the original scan', function (): void {
+    $index = new CqrsDiscoveryIndex(new ClassIterator((static function (): Generator {
+        yield LazyDiscoveryHandler::class => new ClassInfo(LazyDiscoveryHandler::class);
+        Fiber::suspend('discovering');
+        yield LazyDiscoverySecondHandler::class => new ClassInfo(LazyDiscoverySecondHandler::class);
+    })()));
+    $fiber = new Fiber(static fn () => $index->commandHandlers());
+    expect($fiber->start())->toBe('discovering')
+        ->and(fn () => $index->commandListeners())->toThrow(LogicException::class);
+    $fiber->resume();
+
+    $expected = [
+        LazyDiscoveryCommand::class => ['service' => LazyDiscoveryHandler::class, 'method' => '__invoke'],
+        LazyDiscoverySecondCommand::class => ['service' => LazyDiscoverySecondHandler::class, 'method' => '__invoke'],
+    ];
+    expect($fiber->getReturn())->toBe($expected)
+        ->and($index->commandHandlers())->toBe($expected)
+        ->and($index->queryHandlers())->toBe([]);
+});
+
+it('preserves the original failure when a reentrant lookup escapes the source', function (): void {
+    $index = null;
+    $classes = new ClassIterator((static function () use (&$index): Generator {
+        yield LazyDiscoveryHandler::class => new ClassInfo(LazyDiscoveryHandler::class);
+        $index->queryHandlers();
+    })());
+    $index = new CqrsDiscoveryIndex($classes);
+    $failure = null;
+    try {
+        $index->commandHandlers();
+        test()->fail('Expected a reentrant discovery failure.');
+    } catch (LogicException $caught) {
+        $failure = $caught;
+    }
+    try {
+        $index->commandListeners();
+        test()->fail('Expected the original discovery failure.');
+    } catch (LogicException $caught) {
+        expect($caught)->toBe($failure);
+    }
+});

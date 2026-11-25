@@ -11,6 +11,7 @@ use Componenta\CQRS\Command\Attribute\AsCommandListener;
 use Componenta\CQRS\Command\Event\CommandListenerInterface;
 use Componenta\CQRS\Internal\RegistrationNormalizer;
 use Componenta\CQRS\Query\Attribute\AsQueryHandler;
+use LogicException;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionIntersectionType;
@@ -34,6 +35,7 @@ final class CqrsDiscoveryIndex
     /** @var array<array-key, list<Listener>> */
     private array $commandListeners = [];
     private bool $loaded = false;
+    private bool $loading = false;
     private ?Throwable $failure = null;
 
     public function __construct(private readonly ClassIteratorInterface $classes)
@@ -69,6 +71,11 @@ final class CqrsDiscoveryIndex
         if ($this->loaded) {
             return;
         }
+        if ($this->loading) {
+            throw new LogicException('CQRS discovery is already in progress.');
+        }
+
+        $this->loading = true;
         try {
             foreach ($this->classes as $info) {
                 $reflector = $info->reflector;
@@ -86,6 +93,8 @@ final class CqrsDiscoveryIndex
             $this->commandListeners = [];
             $this->failure = $exception;
             throw $exception;
+        } finally {
+            $this->loading = false;
         }
     }
 
