@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Componenta\ClassFinder\ClassIterator;
+use Componenta\CQRS\App\Tests\BuildFixture;
 use Componenta\CQRS\App\Build\CqrsBuilder;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
 use Componenta\CQRS\App\Exception\InvalidDiscoveryDeclarationException;
@@ -69,11 +70,11 @@ it('dispatches iterable and callable object messages from source and built maps'
         new \Componenta\Config\Environment([]),
     );
     $container = (new \Componenta\DI\ContainerFactory())->create($composition->config, $composition->dependencies);
-    $file = sys_get_temp_dir() . '/cqrs_object_parameter_' . bin2hex(random_bytes(8)) . '.php';
+    $root = sys_get_temp_dir() . '/cqrs_object_parameter_' . bin2hex(random_bytes(8));
     try {
         if ($built) {
-            (new CqrsBuilder($index, $file))->build();
-            $maps = require $file;
+            BuildFixture::build($root, new CqrsBuilder($index));
+            $maps = BuildFixture::read($root);
         } else {
             $maps = ['command_handlers' => $index->commandHandlers(), 'query_handlers' => $index->queryHandlers()];
         }
@@ -82,9 +83,7 @@ it('dispatches iterable and callable object messages from source and built maps'
         expect(($commands->locateFor($message))($message))->toBe($expected)
             ->and(($queries->locateFor($message))($message))->toBe($expected);
     } finally {
-        if (is_file($file)) {
-            unlink($file);
-        }
+        BuildFixture::remove($root);
     }
 })->with([
     'iterable' => [IterableObjectHandler::class, new IterableObjectMessage(['iterable result']), 'iterable result'],

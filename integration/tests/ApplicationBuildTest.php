@@ -6,6 +6,9 @@ use Componenta\App\Config\ConfigDefinition;
 use Componenta\App\Config\DiscoveryDefinition;
 use Componenta\App\Config\ConfigFactory;
 use Componenta\App\Runner;
+use Componenta\App\Build\ApplicationBuildRunner;
+use Componenta\App\Build\PreparedBuild;
+use Componenta\App\Console\Command\BuildCommand;
 use Componenta\App\Scope;
 use Componenta\App\Console\IOFactory;
 use Componenta\App\Console\InputFactoryInterface;
@@ -70,14 +73,16 @@ PHP);
             new Componenta\ClassFinder\ConfigProvider(),
             new Componenta\App\ConfigProvider(),
             new Componenta\App\Console\ConfigProvider(),
-            new Componenta\Error\ConfigProvider(),
+            new Componenta\Error\App\ConfigProvider(),
             new Componenta\CQRS\ConfigProvider(),
             new Componenta\CQRS\App\ConfigProvider(),
-            static function () use ($io, &$builderConstructions): array {
+            static function () use ($io, $root, $environment, &$definition, &$builderConstructions): array {
                 return [
-                    'cqrs.map_file' => 'cqrs.php',
                     DIKey::DEPENDENCIES => [
                         DIKey::SERVICES => [IOFactory::class => $io],
+                        DIKey::FACTORIES => [BuildCommand::class => static fn (): BuildCommand => new BuildCommand(
+                            static fn (): PreparedBuild => ApplicationBuildRunner::build(new PathResolver($root), $definition, new Environment(['APP_ENV' => $environment])),
+                        )],
                         DIKey::DELEGATORS => [CqrsBuilder::class => [static function (CqrsBuilder $builder) use (&$builderConstructions): CqrsBuilder {
                             ++$builderConstructions;
                             return $builder;
@@ -100,7 +105,7 @@ PHP);
                 $status = Runner::run(Scope::CLI, $create($input, $environment));
                 Assert::assertSame(0, $status, $output->fetch());
                 Assert::assertSame($initial, $builderConstructions);
-                Assert::assertFileDoesNotExist($root.'/cqrs.php');
+                Assert::assertNull(ConfigFactory::buildStore(new PathResolver($root))->load());
             }
             $container = $create(['command' => 'app:build'], $environment);
             $before = $container->get(CommandBusInterface::class)->dispatch(new AuditFs\Message('source'))->result?->value;
@@ -111,7 +116,7 @@ PHP);
             Assert::assertSame('filesystem:built', $fresh->get(CommandBusInterface::class)->dispatch(new AuditFs\Message('built'))->result?->value);
             Assert::assertSame('filesystem:query', $fresh->get(QueryBusInterface::class)->handle(new AuditFs\Message('query')));
 
-            unlink($root.'/cqrs.php');
+            ConfigFactory::buildStore(new PathResolver($root))->clean();
         }
     } finally {
         spl_autoload_unregister($autoload);

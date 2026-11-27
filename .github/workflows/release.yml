@@ -12,77 +12,22 @@ permissions:
 jobs:
   verify-released-generations:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - php: '8.4'
-            app: '5.0.0'
-            cqrs: '4.0.0'
-            di: '5.0.3'
-          - php: '8.5'
-            app: '5.0.0'
-            cqrs: '4.0.0'
-            di: '5.0.3'
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ matrix.php }}
+          php-version: '8.5'
           coverage: none
           tools: composer:v2
-      - name: Configure Composer authentication
-        run: composer config --global github-oauth.github.com "${{ github.token }}"
       - run: composer validate --strict
-      - name: Select released compatibility generation
-        shell: bash
-        run: |
-          composer require --no-update \
-            "componenta/app:${{ matrix.app }}" \
-            "componenta/cqrs:${{ matrix.cqrs }}" \
-            "componenta/di:${{ matrix.di }}"
-      - name: Install dependency matrix
+      - name: Install the declared released generation
         run: composer update --with-all-dependencies --no-interaction --prefer-dist --no-progress
-      - run: composer test
-      - run: composer analyse
-
-  verify-current-cqrs-v4:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['8.4', '8.5']
-    steps:
-      - uses: actions/checkout@v7
-      - name: Checkout released CQRS v4 source
-        uses: actions/checkout@v7
-        with:
-          repository: componenta/cqrs
-          ref: v4.0.0
-          path: .ci/cqrs
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php }}
-          coverage: none
-          tools: composer:v2
-      - name: Configure Composer authentication
-        run: composer config --global github-oauth.github.com "${{ github.token }}"
-      - run: composer validate --strict
-      - name: Select released CQRS v4 generation
-        shell: bash
-        run: |
-          composer config --json repositories.componenta-cqrs '{"type":"path","url":".ci/cqrs","options":{"versions":{"componenta/cqrs":"4.0.0"}}}'
-          composer require --no-update \
-            componenta/app:5.0.0 \
-            componenta/cqrs:4.0.0 \
-            componenta/di:5.0.3
-      - run: composer update --with-all-dependencies --no-interaction --prefer-dist --no-progress
       - run: composer test
       - run: composer analyse
 
   publish:
     if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v')
-    needs: [verify-released-generations, verify-current-cqrs-v4]
+    needs: [verify-released-generations]
     runs-on: ubuntu-latest
     permissions:
       contents: write

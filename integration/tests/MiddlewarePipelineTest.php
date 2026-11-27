@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Componenta\CQRS\App\Tests\Integration;
 
+require_once dirname(__DIR__, 2) . '/tests/BuildFixture.php';
+
+use Componenta\CQRS\App\Tests\BuildFixture;
+
 use Generator;
 use LogicException;
 use RuntimeException;
@@ -180,6 +184,7 @@ it('preserves transport, policy, retry, locking and transaction semantics with s
                 new \Componenta\App\ConfigProvider(),
                 new \Componenta\CQRS\ConfigProvider(),
                 new \Componenta\CQRS\App\ConfigProvider(),
+                BuildFixture::provider($root),
                 new \Componenta\Policy\ConfigProvider(),
                 new \Componenta\CQRS\Policy\ConfigProvider(),
                 new \Componenta\CQRS\Retry\ConfigProvider(),
@@ -187,7 +192,6 @@ it('preserves transport, policy, retry, locking and transaction semantics with s
                 new \Componenta\CQRS\Transport\ConfigProvider(),
                 new \Componenta\CQRS\Policy\Transport\ConfigProvider(),
                 static fn (): array => [
-                    'cqrs.map_file' => 'cqrs.php',
                     \Componenta\CQRS\ConfigKey::COMMAND_MIDDLEWARES => [
                         PolicyMiddleware::class, TransportMiddleware::class, RetryMiddleware::class,
                         ResourceLockMiddleware::class, TransactionMiddleware::class, EventMiddleware::class,
@@ -244,12 +248,7 @@ it('preserves transport, policy, retry, locking and transaction semantics with s
             }
         }
     } finally {
-        if (is_file($root . '/cqrs.php')) {
-            unlink($root . '/cqrs.php');
-        }
-        if (is_dir($root)) {
-            rmdir($root);
-        }
+        BuildFixture::remove($root);
     }
 
 });

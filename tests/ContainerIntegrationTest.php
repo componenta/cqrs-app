@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Componenta\Config\ConfigFactory;
+use Componenta\CQRS\App\Tests\BuildFixture;
 use Componenta\Config\ConfigProvider as BaseConfigProvider;
 use Componenta\Config\ContainerValue;
 use Componenta\Config\Environment;
@@ -140,10 +141,9 @@ it('uses prepared discovery at runtime and current source only for building', fu
     $root = sys_get_temp_dir() . '/cqrs_discovery_sources_' . bin2hex(random_bytes(8));
     mkdir($root);
     $sourceRequests = 0;
-    $providers = [new CqrsConfigProvider(), new CqrsAppConfigProvider(),
+    $providers = [new CqrsConfigProvider(), new CqrsAppConfigProvider(), BuildFixture::provider($root),
         static function () use ($root, &$sourceRequests): array {
             return [
-                \Componenta\CQRS\App\ConfigKey::MAP_FILE => 'cqrs.php',
                 \Componenta\Config\ConfigKey::DEPENDENCIES => [
                     \Componenta\Config\ConfigKey::SERVICES => [
                         \Componenta\Stdlib\PathResolverInterface::class => new \Componenta\Stdlib\PathResolver($root),
@@ -165,14 +165,13 @@ it('uses prepared discovery at runtime and current source only for building', fu
             'command_handlers' => [], 'query_handlers' => [], 'command_listeners' => [],
         ])->and($sourceRequests)->toBe(0);
 
-        $runtime->get(\Componenta\CQRS\App\Build\CqrsBuilder::class)->build();
+        BuildFixture::build($root, $runtime->get(\Componenta\CQRS\App\Build\CqrsBuilder::class));
         expect($sourceRequests)->toBe(1);
         $fresh = buildCqrsAppIntegrationContainer($providers);
         $command = new CurrentDiscoveryCommand();
         $handler = $fresh->get(CommandHandlerLocatorInterface::class)->locateFor($command);
         expect($handler($command))->toBe('current')->and($sourceRequests)->toBe(1);
     } finally {
-        if (is_file($root . '/cqrs.php')) { unlink($root . '/cqrs.php'); }
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 });

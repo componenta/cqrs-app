@@ -1,6 +1,6 @@
 # Componenta CQRS App
 
-`componenta/cqrs-app` discovers handlers and listeners from attributes and builds PHP files containing their registrations. The CQRS buses and locators are provided by [componenta/cqrs](https://github.com/componenta/cqrs).
+`componenta/cqrs-app` discovers handlers and listeners from attributes and prepares application artifacts containing their registrations. The CQRS buses and locators are provided by [componenta/cqrs](https://github.com/componenta/cqrs).
 
 ## Installation
 
@@ -8,7 +8,7 @@
 composer require componenta/cqrs-app
 ```
 
-This API uses PHP 8.4+, App 4, Config 3, DI 5 and CQRS 4. Class Finder supplies the shared class iterator; Tokenizer supplies class reflection; Path Resolver resolves the artifact path. Install App Console 4 to run `app:build`.
+CQRS App 6 requires PHP 8.5.13+, App 6, Config 4, DI 6 and CQRS 5. Class Finder supplies the shared class iterator; Tokenizer supplies class reflection. Install App Console 6 to run `app:build`.
 
 Register providers in this order:
 
@@ -79,17 +79,17 @@ The provider registers three factories:
 | `CqrsDiscoveryIndex` | Lazily extracts all three registration sections in one pass. Concurrent or reentrant calls during an active scan throw `LogicException` without changing that scan's state. |
 | `CqrsBuilder` | Registered in `app.builders`; writes a complete artifact from original source. |
 
-Configure the output path through `Componenta\CQRS\App\ConfigKey::MAP_FILE` (`cqrs.map_file`). The default is `var/cache/build/cqrs.php`, resolved through the existing `PathResolverInterface`.
+`CqrsBuilder` writes the artifact ID `cqrs.maps` with schema version 1. App owns the build directory, serialization, generation manifest and publication. There is no package-specific output path.
 
 ```bash
 php bin/console.php app:build
 ```
 
-The ordinary console command uses the existing container in its current environment. Listing commands or displaying help does not construct builders or start discovery for the build. Creating a builder only stores dependencies.
+The ordinary console command creates a fresh source composition for the build, independent of the running application’s selected snapshot. Listing commands or displaying help does not construct builders or start discovery for the build. Creating a builder only stores source dependencies.
 
-`CqrsBuilder::build()` reads the original discovery index and explicit registrations, creates directories, writes a complete temporary file beside the destination and publishes it with `rename()`. It does not read the currently loaded runtime map. A source failure leaves the previous artifact intact; a failed publication cleans up its temporary file. Atomicity applies to this artifact, not to all application builders together.
+`CqrsBuilder::build(BuildContext $build)` reads the original discovery index and explicit registrations and passes the complete normalized payload to `BuildContext::write()`. It never reads the currently selected runtime map. App publishes the complete generation only after every builder succeeds. A source, registration or storage error leaves the previous generation selected; a partial CQRS map is never published.
 
-The PHP file returns exactly these sections:
+The payload contains exactly these sections:
 
 ```php
 return [
@@ -99,9 +99,11 @@ return [
 ];
 ```
 
-On the first locator resolution, the shared `cqrs.maps` factory validates explicit configuration and loads the file. A missing, unreadable or malformed file falls back to the original discovery index. Configuration and source errors propagate. Runtime does not create directories, write files or invoke a builder.
+On the first locator resolution, the shared `cqrs.maps` factory validates explicit configuration and reads its artifact from the `PreparedBuild` selected by App. It checks the optional `App\ConfigKey::PREPARED_BUILD` service ID, not a potentially autowired class. A missing, skipped, incompatible or malformed artifact uses the runtime discovery index and explicit registrations. `APP_DISCOVERY_SOURCE=1` bypasses the snapshot. Configuration and source errors propagate. Runtime does not create directories, write files or invoke a builder.
 
-These rules apply in every environment. A current artifact avoids discovery while preserving the same handler selection, listener ordering and errors as source registrations. Rebuild or remove the file when source/configuration changes, deploy it with the matching code, and restart long-running processes. The runtime does not scan files to detect a structurally valid but outdated artifact.
+A valid prepared payload is the complete registration snapshot: current explicit registrations are validated but are not merged over it. Rebuild after changing registrations. Command and query service instances are still resolved through the current container.
+
+These rules apply in every environment. A current artifact avoids discovery while preserving the same handler selection, listener ordering and errors as source registrations. Rebuild or run `app:clean` when source/configuration changes, deploy the generation with matching code and configuration, and restart long-running processes. App can bind a snapshot to an explicit `APP_BUILD_ID`; cleanup unpublishes it for new bootstraps while existing readers retain their selected generation. The runtime does not scan files to detect a structurally valid but outdated artifact.
 
 ## Metadata
 
@@ -109,9 +111,9 @@ Command metadata is supplied by the core `ReflectionCommandMetadataProvider`. It
 
 ## Migration
 
-Replace versioned `cqrs.map`/compiled configuration with explicit registration lists and `cqrs.map_file`. Replace `CqrsMap` and its providers with plain arrays or the shared `cqrs.maps` service. Remove metadata attribute registration and calls to `isKnown()`. Update custom factories to the array locator constructors described in the core README.
+Replace versioned `cqrs.map`/compiled configuration with explicit registration lists. Remove `cqrs.map_file` and `Componenta\CQRS\App\ConfigKey`; this package no longer owns a filesystem path. Replace `CqrsMap` and its providers with plain arrays or the shared `cqrs.maps` service. Remove metadata attribute registration and calls to `isKnown()`. Update custom factories to the array locator constructors described in the core README.
 
-Remove the previous CQRS artifact during deployment and run `app:build` for the matching code/configuration. Existing App and DI cache formats have their own lifecycle.
+Remove the previous independent CQRS artifact during deployment and run `app:build` for the matching code/configuration. `CqrsBuilder` no longer takes a filename and its `build()` method requires a shared `BuildContext`. Individual cleanup was removed; use the application build store or `app:clean`.
 
 ## Integration tests
 
@@ -124,4 +126,4 @@ composer --working-dir=integration install
 composer test:integration
 ```
 
-PHP requires `pdo_sqlite` and `mbstring`. The integration workflow checks out companion `main` branches and runs the suite on PHP 8.4 and 8.5.
+PHP requires `pdo_sqlite` and `mbstring`, version 8.5.13 or later. The path repository version map describes the target releases; the corresponding refactor sources must be checked out until those releases are published. This matrix requires the compatibility releases CQRS Policy 4.1, CQRS Transport 5.1 and CQRS Transaction Cycle 3.1, plus the Retry 4, Lock 4 and Policy 4 refactor lines. Earlier released extensions whose bounds stop at Config 3 or CQRS 4 cannot satisfy it.

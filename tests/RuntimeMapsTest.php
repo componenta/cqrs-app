@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Componenta\App\Build\ApplicationBuildOrchestrator;
+use Componenta\CQRS\App\Tests\BuildFixture;
 use Componenta\ClassFinder\ClassIterator;
 use Componenta\Config\ConfigFactory;
 use Componenta\Config\ConfigKey as DependencyKey;
@@ -40,8 +41,8 @@ function runtimeMapsContainer(string $root, ClassIterator $classes, array $confi
         new \Componenta\App\Console\ConfigProvider(),
         new \Componenta\CQRS\ConfigProvider(),
         new ConfigProvider(),
+        BuildFixture::provider($root, $forceSource),
         static fn (): array => [
-            'cqrs.map_file' => 'cqrs.php',
             ...$config,
             DependencyKey::DEPENDENCIES => [
                 DependencyKey::SERVICES => [
@@ -77,16 +78,13 @@ it('dispatches the same public result from source or a built map in every enviro
         expect($bus->dispatch(new RuntimeMapCommand('second'))->result?->value)->toBe('result:second');
         $container->get(QueryHandlerLocatorInterface::class);
         expect($visited)->toBe($built ? 0 : 1);
-        expect(is_file($root . '/cqrs.php'))->toBe($built);
+        expect(BuildFixture::store($root)->load() !== null)->toBe($built);
     } finally {
-        if (is_file($root . '/cqrs.php')) {
-            unlink($root . '/cqrs.php');
-        }
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 })->with(['development', 'production', 'staging'])->with([false, true]);
 
-it('falls back from an invalid map without writing or replacing it', function (string $contents): void {
+it('ignores legacy files without writing or replacing them', function (string $contents): void {
     $root = sys_get_temp_dir() . '/cqrs_invalid_' . bin2hex(random_bytes(8));
     mkdir($root);
     file_put_contents($root . '/cqrs.php', $contents);
@@ -96,8 +94,7 @@ it('falls back from an invalid map without writing or replacing it', function (s
         expect(file_get_contents($root . '/cqrs.php'))->toBe($contents)
             ->and(array_map('basename', glob($root . '/*')))->toBe(['cqrs.php']);
     } finally {
-        unlink($root . '/cqrs.php');
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 })->with([
     'syntax' => ['<?php broken syntax'],
@@ -110,7 +107,7 @@ it('falls back from an invalid map without writing or replacing it', function (s
 it('rebuilds from source even after the runtime has loaded an older valid map', function (): void {
     $root = sys_get_temp_dir() . '/cqrs_rebuild_' . bin2hex(random_bytes(8));
     mkdir($root);
-    file_put_contents($root . '/cqrs.php', "<?php return ['command_handlers' => [], 'query_handlers' => [], 'command_listeners' => []];");
+    BuildFixture::publish($root, ['command_handlers' => [], 'query_handlers' => [], 'command_listeners' => []]);
     try {
         $container = runtimeMapsContainer($root, runtimeMapsClasses());
         expect($container->get(CommandHandlerLocatorInterface::class)->supports(new RuntimeMapCommand('old')))->toBeFalse();
@@ -118,8 +115,7 @@ it('rebuilds from source even after the runtime has loaded an older valid map', 
         $fresh = runtimeMapsContainer($root, new ClassIterator([]));
         expect($fresh->get(CommandBusInterface::class)->dispatch(new RuntimeMapCommand('new'))->result?->value)->toBe('result:new');
     } finally {
-        unlink($root . '/cqrs.php');
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 });
 
@@ -141,14 +137,11 @@ it('keeps list and help lazy and runs app:build through the same container', fun
         expect($tester->run(['command' => 'list']))->toBe(0);
         expect($tester->getDisplay())->toContain('app:build');
         expect($tester->run(['command' => 'help', 'command_name' => 'app:build']))->toBe(0);
-        expect($visited)->toBe(0)->and(is_file($root . '/cqrs.php'))->toBeFalse();
+        expect($visited)->toBe(0)->and(BuildFixture::store($root)->load() !== null)->toBeFalse();
         expect($tester->run(['command' => 'app:build']))->toBe(0);
-        expect($visited)->toBe(1)->and(is_file($root . '/cqrs.php'))->toBeTrue();
+        expect($visited)->toBe(1)->and(BuildFixture::store($root)->load() !== null)->toBeTrue();
     } finally {
-        if (is_file($root . '/cqrs.php')) {
-            unlink($root . '/cqrs.php');
-        }
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 });
 
@@ -167,9 +160,9 @@ it('reports a nonzero command status when a CQRS builder cannot read source', fu
         $tester = new \Symfony\Component\Console\Tester\ApplicationTester($application);
         expect($tester->run(['command' => 'app:build']))->toBe(1);
         expect($tester->getDisplay())->toContain('discovery unavailable');
-        expect(is_file($root . '/cqrs.php'))->toBeFalse();
+        expect(BuildFixture::store($root)->load())->toBeNull();
     } finally {
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 });
 
@@ -258,10 +251,7 @@ it('keeps listener deduplication, priority and event filtering equivalent with a
             ['last', \Componenta\CQRS\Command\Event\CommandProcessedEvent::class],
         ]);
     } finally {
-        if (is_file($root . '/cqrs.php')) {
-            unlink($root . '/cqrs.php');
-        }
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 })->with([false, true]);
 
@@ -274,8 +264,7 @@ it('rejects invalid explicit registration even when the artifact is valid', func
         expect(fn () => $container->get(CommandBusInterface::class))
             ->toThrow(\Componenta\DI\Exception\ResolutionException::class, 'cqrs.command_handlers');
     } finally {
-        unlink($root . '/cqrs.php');
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 });
 
@@ -319,10 +308,7 @@ it('merges explicit queries and listeners with discovered command handlers in bo
             ['first', \Componenta\CQRS\Command\Event\CommandProcessedEvent::class],
         ]);
     } finally {
-        if (is_file($root . '/cqrs.php')) {
-            unlink($root . '/cqrs.php');
-        }
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 })->with([false, true]);
 
@@ -383,41 +369,33 @@ it('merges numeric message names and preserves dispatch after building the map',
         }
         expect($container->get(RuntimeNumericListener::class)->names)->toBe($names);
     } finally {
-        if (is_file($root . '/cqrs.php')) {
-            unlink($root . '/cqrs.php');
-        }
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 })->with([false, true]);
 
 
-it('rejects an invalid configured map path before discovery or artifact publication', function (mixed $path): void {
-    $root = sys_get_temp_dir() . '/cqrs_invalid_path_' . bin2hex(random_bytes(8));
-    $visited = 0;
-    $classes = new ClassIterator((static function () use (&$visited): Generator {
-        ++$visited;
-        yield RuntimeMapHandler::class => new ClassInfo(RuntimeMapHandler::class);
-    })());
-    $container = runtimeMapsContainer($root, $classes, ['cqrs.map_file' => $path]);
-    expect(fn () => $container->get(CommandBusInterface::class))
-        ->toThrow(\Componenta\DI\Exception\ResolutionException::class, 'must be a non-empty path')
-        ->and($visited)->toBe(0)
-        ->and(is_dir($root))->toBeFalse();
-
-    $container = runtimeMapsContainer($root, $classes, ['cqrs.map_file' => $path]);
-    expect(fn () => $container->get(ApplicationBuildOrchestrator::class)->build())
-        ->toThrow(\Componenta\DI\Exception\ResolutionException::class, 'must be a non-empty path')
-        ->and($visited)->toBe(0)
-        ->and(is_dir($root))->toBeFalse();
-})->with(['', " \t\n", 42, [['cqrs.php']]]);
+it('rejects unsupported prepared payloads and schemas without rewriting the selected generation', function (array $map, int $schema): void {
+    $root = sys_get_temp_dir() . '/cqrs_invalid_payload_' . bin2hex(random_bytes(8));
+    try {
+        $prepared = BuildFixture::publish($root, $map, $schema);
+        $container = runtimeMapsContainer($root, runtimeMapsClasses());
+        expect($container->get(CommandBusInterface::class)->dispatch(new RuntimeMapCommand('fallback'))->result?->value)
+            ->toBe('result:fallback');
+        expect(BuildFixture::store($root)->load()?->generation)->toBe($prepared->generation);
+    } finally {
+        BuildFixture::remove($root);
+    }
+})->with([
+    'missing sections' => [['command_handlers' => []], 1],
+    'invalid handler' => [['command_handlers' => ['c' => ['service' => '']], 'query_handlers' => [], 'command_listeners' => []], 1],
+    'future schema' => [['command_handlers' => [], 'query_handlers' => [], 'command_listeners' => []], 2],
+]);
 
 
 it('bypasses a stale CQRS map during explicit source recovery', function (): void {
     $root = sys_get_temp_dir() . '/cqrs_recovery_' . bin2hex(random_bytes(8));
     mkdir($root);
-    $file = $root . '/cqrs.php';
-    $contents = "<?php return ['command_handlers' => [], 'query_handlers' => [], 'command_listeners' => []];";
-    file_put_contents($file, $contents);
+    $prepared = BuildFixture::publish($root, ['command_handlers' => [], 'query_handlers' => [], 'command_listeners' => []]);
     try {
         $ordinary = runtimeMapsContainer($root, runtimeMapsClasses());
         expect($ordinary->get(CommandHandlerLocatorInterface::class)->supports(new RuntimeMapCommand('old')))->toBeFalse();
@@ -425,9 +403,31 @@ it('bypasses a stale CQRS map during explicit source recovery', function (): voi
         $recovery = runtimeMapsContainer($root, runtimeMapsClasses(), forceSource: true);
         expect($recovery->get(CommandBusInterface::class)->dispatch(new RuntimeMapCommand('recovered'))->result?->value)
             ->toBe('result:recovered');
-        expect(file_get_contents($file))->toBe($contents);
+        expect(BuildFixture::store($root)->load()?->generation)->toBe($prepared->generation);
     } finally {
-        unlink($file);
-        rmdir($root);
+        BuildFixture::remove($root);
+    }
+});
+
+final class RuntimeChangedHandler
+{
+    public function __invoke(RuntimeMapCommand $command): string { return 'changed:' . $command->value; }
+}
+
+it('uses the complete selected registration snapshot until an explicit source bootstrap', function (): void {
+    $root = sys_get_temp_dir() . '/cqrs_snapshot_' . bin2hex(random_bytes(8));
+    try {
+        runtimeMapsContainer($root, runtimeMapsClasses())->get(ApplicationBuildOrchestrator::class)->build();
+        $config = ['cqrs.command_handlers' => [
+            ['message' => RuntimeMapCommand::class, 'service' => RuntimeChangedHandler::class, 'method' => '__invoke'],
+        ]];
+        $prepared = runtimeMapsContainer($root, new ClassIterator([]), $config);
+        $source = runtimeMapsContainer($root, new ClassIterator([]), $config, forceSource: true);
+        expect($prepared->get(CommandBusInterface::class)->dispatch(new RuntimeMapCommand('value'))->result?->value)
+            ->toBe('result:value');
+        expect($source->get(CommandBusInterface::class)->dispatch(new RuntimeMapCommand('value'))->result?->value)
+            ->toBe('changed:value');
+    } finally {
+        BuildFixture::remove($root);
     }
 });

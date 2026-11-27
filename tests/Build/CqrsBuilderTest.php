@@ -5,141 +5,100 @@ declare(strict_types=1);
 use Componenta\ClassFinder\ClassIterator;
 use Componenta\CQRS\App\Build\CqrsBuilder;
 use Componenta\CQRS\App\Discovery\CqrsDiscoveryIndex;
+use Componenta\CQRS\App\Tests\BuildFixture;
 use Componenta\CQRS\Command\Attribute\AsCommandHandler;
 use Componenta\Tokenizer\ClassInfo;
 
-final class BuildCommandMessage
-{
-}
+final class BuildCommandMessage {}
 #[AsCommandHandler]
 final class BuildCommandHandler
 {
-    public function __invoke(BuildCommandMessage $command): void
-    {
-    }
+    public function __invoke(BuildCommandMessage $command): void {}
 }
 
 it('builds a complete map from source without doing work during construction', function (): void {
     $root = sys_get_temp_dir() . '/cqrs_build_' . bin2hex(random_bytes(8));
-    $file = $root . '/nested/cqrs.php';
     $reads = 0;
     $index = new CqrsDiscoveryIndex(new ClassIterator((static function () use (&$reads): Generator {
         ++$reads;
         yield BuildCommandHandler::class => new ClassInfo(BuildCommandHandler::class);
     })()));
-    $builder = new CqrsBuilder($index, $file, queryHandlers: [
+    $builder = new CqrsBuilder($index, queryHandlers: [
         ['message' => 'query', 'service' => 'query.handler', 'method' => 'handle'],
     ]);
     try {
         expect(is_dir($root))->toBeFalse()->and($reads)->toBe(0);
-        $builder->build();
-        expect(require $file)->toBe([
+        BuildFixture::build($root, $builder);
+        expect(BuildFixture::read($root))->toBe([
             'command_handlers' => [BuildCommandMessage::class => ['service' => BuildCommandHandler::class, 'method' => '__invoke']],
             'query_handlers' => ['query' => ['service' => 'query.handler', 'method' => 'handle']],
             'command_listeners' => [],
-        ])->and($reads)->toBe(1)
-          ->and(array_map('basename', glob($root . '/nested/*')))->toBe(['cqrs.php']);
+        ])->and($reads)->toBe(1);
     } finally {
-        if (is_file($file)) {
-            unlink($file);
-        }
-        if (is_dir($root . '/nested')) {
-            rmdir($root . '/nested');
-        }
-        if (is_dir($root)) {
-            rmdir($root);
-        }
+        BuildFixture::remove($root);
     }
 });
 
-it('preserves an earlier artifact if source discovery fails', function (): void {
-    $file = tempnam(sys_get_temp_dir(), 'cqrs_previous_');
-    file_put_contents($file, 'previous artifact');
+it('preserves an earlier generation if source discovery fails', function (): void {
+    $root = sys_get_temp_dir() . '/cqrs_previous_' . bin2hex(random_bytes(8));
     $failure = new RuntimeException('cannot discover');
     $index = new CqrsDiscoveryIndex(new ClassIterator((static function () use ($failure): Generator {
         throw $failure;
         yield;
     })()));
     try {
-        expect(fn () => (new CqrsBuilder($index, $file))->build())->toThrow($failure);
-        expect(file_get_contents($file))->toBe('previous artifact');
+        $previous = BuildFixture::publish($root, ['command_handlers' => [], 'query_handlers' => [], 'command_listeners' => []]);
+        expect(fn () => BuildFixture::build($root, new CqrsBuilder($index)))->toThrow($failure);
+        expect(BuildFixture::store($root)->load()?->generation)->toBe($previous->generation);
+        expect(BuildFixture::read($root))->toBe($previous->read(CqrsBuilder::ARTIFACT_ID));
     } finally {
-        unlink($file);
+        BuildFixture::remove($root);
     }
 });
 
-it('replaces an existing artifact with a complete new map', function (): void {
+it('publishes an empty new map without modifying an already selected snapshot', function (): void {
     $root = sys_get_temp_dir() . '/cqrs_replace_' . bin2hex(random_bytes(8));
-    mkdir($root);
-    $file = $root . '/cqrs.php';
-    file_put_contents($file, '<?php return null;');
     try {
-        (new CqrsBuilder(new CqrsDiscoveryIndex(new ClassIterator([])), $file))->build();
-        expect(require $file)->toBe([
-            'command_handlers' => [],
-            'query_handlers' => [],
-            'command_listeners' => [],
+        $previous = BuildFixture::build($root, new CqrsBuilder(new CqrsDiscoveryIndex(new ClassIterator([
+            new ClassInfo(BuildCommandHandler::class),
+        ]))));
+        $current = BuildFixture::build($root, new CqrsBuilder(new CqrsDiscoveryIndex(new ClassIterator([]))));
+        expect(BuildFixture::read($root))->toBe([
+            'command_handlers' => [], 'query_handlers' => [], 'command_listeners' => [],
         ]);
-        expect(array_map('basename', glob($root . '/*')))->toBe(['cqrs.php']);
+        expect($current->generation)->not->toBe($previous->generation);
+        expect($previous->read(CqrsBuilder::ARTIFACT_ID)['command_handlers'])->toHaveKey(BuildCommandMessage::class);
     } finally {
-        unlink($file);
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 });
 
-it('cleans temporary files when publishing fails and preserves the destination', function (): void {
+it('propagates shared store write failures without overwriting a file at its directory', function (): void {
     $root = sys_get_temp_dir() . '/cqrs_publish_failure_' . bin2hex(random_bytes(8));
-    mkdir($root . '/cqrs.php', 0o755, true);
-    file_put_contents($root . '/cqrs.php/existing', 'preserved');
+    mkdir($root);
+    file_put_contents($root . '/build', 'preserved');
     try {
-        $builder = new CqrsBuilder(new CqrsDiscoveryIndex(new ClassIterator([])), $root . '/cqrs.php');
-        expect(fn () => $builder->build())->toThrow(ErrorException::class, 'rename');
-        expect(file_get_contents($root . '/cqrs.php/existing'))->toBe('preserved');
-        expect(glob($root . '/.*.tmp'))->toBe([]);
+        $builder = new CqrsBuilder(new CqrsDiscoveryIndex(new ClassIterator([])));
+        expect(fn () => BuildFixture::build($root, $builder))->toThrow(ErrorException::class);
+        expect(file_get_contents($root . '/build'))->toBe('preserved');
     } finally {
-        unlink($root . '/cqrs.php/existing');
-        rmdir($root . '/cqrs.php');
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 });
 
 it('preserves the published map when a discovered handler conflicts with explicit registration', function (): void {
     $root = sys_get_temp_dir() . '/cqrs_build_conflict_' . bin2hex(random_bytes(8));
-    mkdir($root);
-    $file = $root . '/cqrs.php';
-    $builder = new CqrsBuilder(
-        new CqrsDiscoveryIndex(new ClassIterator([
-            BuildCommandHandler::class => new ClassInfo(BuildCommandHandler::class),
-        ])),
-        $file,
-    );
+    $source = static fn () => new CqrsDiscoveryIndex(new ClassIterator([new ClassInfo(BuildCommandHandler::class)]));
     try {
-        $builder->build();
-        $original = file_get_contents($file);
-        $conflicting = new CqrsBuilder(
-            new CqrsDiscoveryIndex(new ClassIterator([
-                BuildCommandHandler::class => new ClassInfo(BuildCommandHandler::class),
-            ])),
-            $file,
-            commandHandlers: [
-                ['message' => BuildCommandMessage::class, 'service' => 'other.handler', 'method' => 'handle'],
-            ],
-        );
-        expect(fn () => $conflicting->build())
+        $previous = BuildFixture::build($root, new CqrsBuilder($source()));
+        $conflicting = new CqrsBuilder($source(), commandHandlers: [
+            ['message' => BuildCommandMessage::class, 'service' => 'other.handler', 'method' => 'handle'],
+        ]);
+        expect(fn () => BuildFixture::build($root, $conflicting))
             ->toThrow(\Componenta\CQRS\Map\Exception\CqrsMapConflictException::class);
-        expect(file_get_contents($file))->toBe($original)
-            ->and(require $file)->toBe([
-                'command_handlers' => [
-                    BuildCommandMessage::class => ['service' => BuildCommandHandler::class, 'method' => '__invoke'],
-                ],
-                'query_handlers' => [],
-                'command_listeners' => [],
-            ])
-            ->and(glob($root . '/.*.tmp'))->toBe([]);
+        expect(BuildFixture::store($root)->load()?->generation)->toBe($previous->generation)
+            ->and(BuildFixture::read($root))->toBe($previous->read(CqrsBuilder::ARTIFACT_ID));
     } finally {
-        if (is_file($file)) {
-            unlink($file);
-        }
-        rmdir($root);
+        BuildFixture::remove($root);
     }
 });

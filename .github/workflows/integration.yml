@@ -1,4 +1,4 @@
-name: CQRS integration
+name: Unified build integration
 
 on:
   push:
@@ -7,30 +7,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: unified-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   integration:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        php: ['8.4', '8.5']
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: cqrs-app
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '${{ matrix.php }}'
-          extensions: mbstring, pdo_sqlite
-          coverage: none
-          tools: composer:v2
-      - name: Check out companion packages
-        run: |
-          set -euo pipefail
-          php -r '$manifest = json_decode(file_get_contents("cqrs-app/integration/composer.json"), true, flags: JSON_THROW_ON_ERROR); $versions = $manifest["repositories"][0]["options"]["versions"]; foreach (array_keys($manifest["require"]) as $package) { if (str_starts_with($package, "componenta/") && $package !== "componenta/cqrs-app") { echo substr($package, strlen("componenta/")), " v", $versions[$package], PHP_EOL; } }' > "$RUNNER_TEMP/companion-versions"
-          while read -r package tag; do
-            git clone --depth 1 --branch "$tag" "https://github.com/componenta/$package.git" "$package"
-          done < "$RUNNER_TEMP/companion-versions"
-      - name: Install integration dependencies
-        run: composer --working-dir=cqrs-app/integration install --no-interaction --prefer-dist --no-scripts
-      - name: Test package integration
-        run: composer --working-dir=cqrs-app/integration test
+    uses: componenta/skeleton/.github/workflows/build-integration.yml@refactor/unified-application-build-2026-11-27
+    with:
+      repository: ${{ github.repository }}
+      revision: ${{ github.sha }}
